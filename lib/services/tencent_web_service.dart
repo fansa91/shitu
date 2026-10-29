@@ -138,6 +138,20 @@ String? parseTencentRegeoJson(Map<String, dynamic> json) {
   return address.isEmpty ? null : address;
 }
 
+/// 解析腾讯逆地理编码响应 → 城市名（纯函数，供单测）。
+/// 腾讯公交接口不要求城市参数，此方法供接口一致性与后续功能使用。
+String? parseTencentRegeoCityJson(Map<String, dynamic> json) {
+  final result = _ensureTencentOk(json);
+  final component = result['address_component'];
+  if (component is Map<String, dynamic>) {
+    final city = component['city']?.toString() ?? '';
+    if (city.isNotEmpty) return city;
+    final province = component['province']?.toString() ?? '';
+    if (province.isNotEmpty) return province;
+  }
+  return null;
+}
+
 /// 腾讯 Web 服务真实实现。返回坐标即 GCJ-02，无需转换。
 class TencentWebService implements MapDataService {
   TencentWebService({required this.keyProvider, WebApiClient? client})
@@ -199,6 +213,20 @@ class TencentWebService implements MapDataService {
       return parseTencentRegeoJson(json);
     } catch (_) {
       return null; // 逆地理只是补地名，失败不打断定位主流程
+    }
+  }
+
+  @override
+  Future<String?> reverseGeocodeCity(
+      GeoPoint point, MapProvider provider) async {
+    try {
+      final json = await _api.getJson(
+        _uri('/ws/geocoder/v1/', {'location': _latLng(point)}),
+        providerName: _providerName,
+      );
+      return parseTencentRegeoCityJson(json);
+    } catch (_) {
+      return null;
     }
   }
 

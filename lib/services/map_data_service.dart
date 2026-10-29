@@ -18,6 +18,10 @@ abstract class MapDataService {
   /// 逆地理编码：坐标 → 格式化地址。取不到（无 Key / 接口失败）返回 null，
   /// 调用方据此回退展示「我的位置（定位坐标）」，不要抛错打断定位主流程。
   Future<String?> reverseGeocode(GeoPoint point, MapProvider provider);
+
+  /// 逆地理编码取所在城市名（公交算路拼 city 参数用）。
+  /// 取不到返回 null，调用方按 [resolveTransitCities] 的回落规则处理。
+  Future<String?> reverseGeocodeCity(GeoPoint point, MapProvider provider);
   Future<RoutePlan> planRoute({
     required Poi origin,
     required Poi destination,
@@ -27,6 +31,20 @@ abstract class MapDataService {
 
   /// 验活：真实实现发一次轻量请求；示例实现直接返回说明文案。
   Future<String> testConnection();
+}
+
+/// 公交算路的城市参数回落规则（纯函数，供单测）：
+/// 起点城市优先，缺失时用终点城市兜底；终点城市（cityd）反之。
+/// 两边都取不到 → 都为 null，由各服务按自家要求处理
+/// （高德必填 → 抛中文提示；百度/腾讯可省略走坐标解析）。
+({String? city, String? cityd}) resolveTransitCities({
+  String? originCity,
+  String? destinationCity,
+}) {
+  return (
+    city: originCity ?? destinationCity,
+    cityd: destinationCity ?? originCity,
+  );
 }
 
 /// 示例实现。
@@ -100,6 +118,11 @@ class SampleMapDataService implements MapDataService {
   @override
   Future<String?> reverseGeocode(GeoPoint point, MapProvider provider) async =>
       null; // 示例模式不做逆地理编码
+
+  @override
+  Future<String?> reverseGeocodeCity(
+          GeoPoint point, MapProvider provider) async =>
+      null; // 示例模式不查城市，公交走示例路线不需要城市参数
 
   @override
   Future<RoutePlan> planRoute({

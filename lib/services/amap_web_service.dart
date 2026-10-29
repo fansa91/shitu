@@ -214,6 +214,20 @@ String? parseAmapRegeoJson(Map<String, dynamic> json) {
   return address.isEmpty ? null : address;
 }
 
+/// 解析逆地理编码响应 → 城市名（纯函数，供单测）。
+/// 高德 addressComponent.city 在直辖市时为空数组，此时用 province 兜底。
+String? parseAmapRegeoCityJson(Map<String, dynamic> json) {
+  _ensureAmapOk(json);
+  final regeo = json['regeocode'];
+  if (regeo is! Map<String, dynamic>) return null;
+  final component = regeo['addressComponent'];
+  if (component is! Map<String, dynamic>) return null;
+  final city = component['city'];
+  if (city is String && city.isNotEmpty) return city;
+  final province = component['province']?.toString() ?? '';
+  return province.isEmpty ? null : province;
+}
+
 /// 高德 Web 服务真实实现。Key 通过 [keyProvider] 在每次请求时读取，
 /// 保证设置页改 Key 后无需重建服务即生效。
 class AmapWebService implements MapDataService {
@@ -280,6 +294,20 @@ class AmapWebService implements MapDataService {
   }
 
   @override
+  Future<String?> reverseGeocodeCity(
+      GeoPoint point, MapProvider provider) async {
+    try {
+      final json = await _api.getJson(
+        _uri('/v3/geocode/regeo', {'location': _lngLat(point)}),
+        providerName: _providerName,
+      );
+      return parseAmapRegeoCityJson(json);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
   Future<RoutePlan> planRoute({
     required Poi origin,
     required Poi destination,
@@ -317,12 +345,25 @@ class AmapWebService implements MapDataService {
         );
         options = parseAmapSimpleRouteJson(json, mode: mode);
       case TransportMode.transit:
+        // 公交必须带城市：逆地理查起点/终点城市，互相兜底；
+        // 都查不到才明确提示用户（不再写死深圳）。
+        final cities = resolveTransitCities(
+          originCity: await reverseGeocodeCity(o, provider),
+          destinationCity: await reverseGeocodeCity(d, provider),
+        );
+        final city = cities.city;
+        if (city == null) {
+          throw const MapApiException(
+            MapApiErrorKind.precondition,
+            '无法确定起点所在城市（公交算路必填城市）：请检查网络与 Key 后重试，或切换数据源',
+          );
+        }
         final json = await _api.getJson(
           _uri('/v3/direction/transit/integrated', {
             'origin': originText,
             'destination': destText,
-            'city': '深圳',
-            'cityd': '深圳',
+            'city': city,
+            'cityd': cities.cityd ?? city,
           }),
           providerName: _providerName,
         );

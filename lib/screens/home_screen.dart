@@ -206,6 +206,18 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// 实时路况：真实底图时切换高德路况图层（AppMap → AMapWidget.trafficEnabled）；
+  /// 示意地图（无 SDK Key / 未同意隐私 / 桌面端）没有路况图层，点按给明确说明，
+  /// 不假装已开启。
+  void _toggleTraffic() {
+    if (!AmapSdkService.instance.canShowRealMap(_settings)) {
+      _snack('实时路况需要高德底图：填入高德 SDK Key 并同意隐私后可用（当前为示意地图）');
+      return;
+    }
+    setState(() => _trafficOn = !_trafficOn);
+    _snack('实时路况${_trafficOn ? '已开' : '已关'}');
+  }
+
   void _toggle3d() {
     setState(() => _is3d = !_is3d);
     final center = _cameraCenter ?? _myLocation ?? _selectedPoi?.location;
@@ -612,10 +624,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final following = _followLock.following;
     return Column(
       children: [
-        btn(Icons.layers_outlined, '实时路况', () {
-          setState(() => _trafficOn = !_trafficOn);
-          _snack('实时路况${_trafficOn ? '已开' : '已关'}');
-        }, active: _trafficOn),
+        btn(Icons.layers_outlined, '实时路况', _toggleTraffic,
+            active: _trafficOn),
         const SizedBox(height: 8),
         btn(Icons.add, '放大', () => _mapHandle.zoomIn()),
         const SizedBox(height: 8),

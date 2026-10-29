@@ -114,6 +114,36 @@ String? parseBaiduRegeoJson(Map<String, dynamic> json) {
   return address.isEmpty ? null : address;
 }
 
+/// 解析百度逆地理编码响应 → 城市名（纯函数，供单测）。
+String? parseBaiduRegeoCityJson(Map<String, dynamic> json) {
+  final result = _ensureBaiduOk(json);
+  final component = result['addressComponent'];
+  if (component is! Map<String, dynamic>) return null;
+  final city = component['city']?.toString() ?? '';
+  return city.isEmpty ? null : city;
+}
+
+/// 百度公交（direction/v2/transit）参数拼装（纯函数，供单测）：
+/// 查到城市时带 origin_region / destination_region（跨城必传），
+/// 查不到则省略，百度按坐标自行解析同城公交。
+Map<String, String> buildBaiduTransitParams({
+  required String origin,
+  required String destination,
+  String? originCity,
+  String? destinationCity,
+}) {
+  final cities = resolveTransitCities(
+    originCity: originCity,
+    destinationCity: destinationCity,
+  );
+  return {
+    'origin': origin,
+    'destination': destination,
+    if (cities.city != null) 'origin_region': cities.city!,
+    if (cities.cityd != null) 'destination_region': cities.cityd!,
+  };
+}
+
 /// 百度 Web 服务真实实现。坐标进出统一转换：
 /// 请求前 GCJ-02 → BD-09，响应折线/POI 的 BD-09 → GCJ-02。
 class BaiduWebService implements MapDataService {
@@ -189,6 +219,23 @@ class BaiduWebService implements MapDataService {
   }
 
   @override
+  Future<String?> reverseGeocodeCity(
+      GeoPoint point, MapProvider provider) async {
+    try {
+      final json = await _api.getJson(
+        _uri('/reverse_geocoding/v3/', {
+          'location': _bdLatLng(point),
+          'coordtype': 'bd09ll',
+        }),
+        providerName: _providerName,
+      );
+      return parseBaiduRegeoCityJson(json);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
   Future<RoutePlan> planRoute({
     required Poi origin,
     required Poi destination,
@@ -211,11 +258,16 @@ class BaiduWebService implements MapDataService {
       TransportMode.cycling => '/direction/v2/riding',
       TransportMode.transit => '/direction/v2/transit',
     };
+    final params = mode == TransportMode.transit
+        ? buildBaiduTransitParams(
+            origin: _bdLatLng(o),
+            destination: _bdLatLng(d),
+            originCity: await reverseGeocodeCity(o, provider),
+            destinationCity: await reverseGeocodeCity(d, provider),
+          )
+        : {'origin': _bdLatLng(o), 'destination': _bdLatLng(d)};
     final json = await _api.getJson(
-      _uri(endpoint, {
-        'origin': _bdLatLng(o),
-        'destination': _bdLatLng(d),
-      }),
+      _uri(endpoint, params),
       providerName: _providerName,
     );
     final options = parseBaiduRouteJson(json, mode: mode);
