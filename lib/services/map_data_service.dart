@@ -13,6 +13,12 @@ abstract class MapDataService {
   bool get isSample;
 
   Future<List<Poi>> searchSuggestions(String query, MapProvider provider);
+
+  /// 输入联想（打字时防抖调用）：真实实现调各家官方联想接口
+  /// （高德 inputtips / 百度 suggestion / 腾讯 suggestion），
+  /// 示例实现回落到 [searchSuggestions] 的示例过滤。
+  Future<List<Poi>> inputTips(String query, MapProvider provider);
+
   Future<List<Poi>> nearbyPois(MapProvider provider);
 
   /// 逆地理编码：坐标 → 格式化地址。取不到（无 Key / 接口失败）返回 null，
@@ -123,10 +129,6 @@ class SampleMapDataService implements MapDataService {
   Future<String?> reverseGeocodeCity(
           GeoPoint point, MapProvider provider) async =>
       null; // 示例模式不查城市，公交走示例路线不需要城市参数
-
-  @override
-  Future<List<Poi>> inputTips(String query, MapProvider provider) =>
-      searchSuggestions(query, provider);
 
   @override
   Future<List<Poi>> inputTips(String query, MapProvider provider) =>

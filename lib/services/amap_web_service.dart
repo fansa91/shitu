@@ -60,6 +60,31 @@ List<GeoPoint> parseAmapPolyline(String text) {
   return points;
 }
 
+/// 解析高德输入提示（assistant/inputtips）响应（纯函数，供单测）。
+/// tips 的 id/location/address 在无结果时可能是空数组，按文档防御解析。
+List<Poi> parseAmapInputTipsJson(Map<String, dynamic> json) {
+  _ensureAmapOk(json);
+  final tips = json['tips'];
+  if (tips is! List) return const [];
+  final pois = <Poi>[];
+  for (final raw in tips.whereType<Map<String, dynamic>>()) {
+    String textOf(Object? v) => v is String ? v : '';
+    final name = textOf(raw['name']);
+    if (name.isEmpty) continue;
+    final district = textOf(raw['district']);
+    final address = textOf(raw['address']);
+    final id = textOf(raw['id']);
+    pois.add(Poi(
+      id: id.isEmpty ? 'amap-tip-$name' : id,
+      name: name,
+      address: address.isEmpty ? district : '$district$address',
+      category: '',
+      location: _parseAmapLocation(textOf(raw['location'])),
+    ));
+  }
+  return pois;
+}
+
 /// 解析 place/text 搜索响应（纯函数，供单测以 fixture 验证）。
 List<Poi> parseAmapSearchJson(Map<String, dynamic> json) {
   _ensureAmapOk(json);

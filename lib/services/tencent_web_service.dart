@@ -47,7 +47,7 @@ List<Poi> parseTencentSuggestionJson(Map<String, dynamic> json) {
       name: name,
       address: raw['address']?.toString() ?? '',
       category: raw['category']?.toString() ?? '',
-      location: _tencentLocation(raw['location']),
+      location: _parseTencentLocation(raw['location']),
     ));
   }
   return pois;
