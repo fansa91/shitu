@@ -7,12 +7,15 @@ import 'package:shitu/services/places_service.dart';
 import 'package:shitu/services/settings_service.dart';
 import 'package:shitu/services/track_service.dart';
 
+import 'secure_storage_mock.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets('主页渲染搜索栏、数据源芯片与底部面板快捷入口',
       (WidgetTester tester) async {
     SharedPreferences.setMockInitialValues({});
+    installSecureStorageMock();
     final settings = SettingsService();
     await settings.load();
     final places = PlacesService();

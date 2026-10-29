@@ -7,11 +7,14 @@ import 'package:shitu/models/map_provider.dart';
 import 'package:shitu/services/settings_service.dart';
 import 'package:shitu/theme/appearance.dart';
 
+import 'secure_storage_mock.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+    installSecureStorageMock(); // Key 已迁安全存储，通道用内存 mock
   });
 
   test('默认值：高德 + 系统语音 + 预合成开 + 无 Key', () async {

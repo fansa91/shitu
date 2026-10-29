@@ -7,8 +7,14 @@ import 'package:shitu/services/map_data_service.dart';
 import 'package:shitu/services/map_data_services.dart';
 import 'package:shitu/services/settings_service.dart';
 
+import 'secure_storage_mock.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() {
+    installSecureStorageMock(); // Key 已迁安全存储
+  });
 
   group('服务工厂回退逻辑', () {
     test('无 Key → SampleMapDataService 且标注示例', () async {

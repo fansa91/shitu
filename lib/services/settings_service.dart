@@ -1,6 +1,7 @@
 import 'dart:ui' show Color;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/map_provider.dart';
@@ -8,9 +9,17 @@ import '../theme/appearance.dart';
 
 /// 应用设置：三家服务商 Key、当前服务商、TTS 偏好。
 ///
-/// TODO(安全): 骨架阶段用 SharedPreferences 明文持久化以便调试；
-/// 正式版应换成 flutter_secure_storage，Key 不落明文。
+/// 持久化分工：Key 类字段（四家 Web/SDK Key + 英伟达 Key）存
+/// flutter_secure_storage（Android Keystore / iOS Keychain），不落明文；
+/// 其余非敏感设置仍存 SharedPreferences。对外同步 getter 接口不变，
+/// 安全存储在 [load] 里异步读完并做一次性明文迁移（见 [_loadKeys]）。
+/// 安全存储不可用时（如无平台通道的测试环境）Key 仅内存生效，
+/// 绝不回退写明文。
 class SettingsService extends ChangeNotifier {
+  SettingsService({FlutterSecureStorage? secureStorage})
+      : _secure = secureStorage ?? const FlutterSecureStorage();
+
+  final FlutterSecureStorage _secure;
   static const _kProvider = 'provider';
   static const _kKeyAmap = 'key_amap';
   static const _kKeyBaidu = 'key_baidu';
@@ -73,23 +82,84 @@ class SettingsService extends ChangeNotifier {
   /// 是否至少填了一家服务商的 Key（主页引导卡以此判断）。
   bool get hasAnyKey => MapProvider.values.any(hasKeyFor);
 
+  /// 全部 Key 类字段的存储 key（安全存储与旧 prefs 共用同一组名字）。
+  static const _keyFields = [
+    _kKeyAmap,
+    _kKeyBaidu,
+    _kKeyTencent,
+    _kKeyNvidia,
+    _kAmapSdkAndroidKey,
+    _kAmapSdkIosKey,
+  ];
+
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
     _provider = _providerFromName(prefs.getString(_kProvider));
-    _keys[MapProvider.amap] = prefs.getString(_kKeyAmap) ?? '';
-    _keys[MapProvider.baidu] = prefs.getString(_kKeyBaidu) ?? '';
-    _keys[MapProvider.tencent] = prefs.getString(_kKeyTencent) ?? '';
-    _nvidiaKey = prefs.getString(_kKeyNvidia) ?? '';
     _nvidiaVoice = prefs.getString(_kNvidiaVoice) ?? 'Siwei';
     _ttsEngine = _ttsFromName(prefs.getString(_kTtsEngine));
     _ttsPresynthesize = prefs.getBool(_kTtsPresynthesize) ?? true;
-    _amapSdkAndroidKey = prefs.getString(_kAmapSdkAndroidKey) ?? '';
-    _amapSdkIosKey = prefs.getString(_kAmapSdkIosKey) ?? '';
     _privacyAgreed = prefs.getBool(_kPrivacyAgreed) ?? false;
     _themeMode = _themeModeFromName(prefs.getString(_kThemeMode));
     _dynamicColorEnabled = prefs.getBool(_kDynamicColor) ?? true;
     _seedColorValue = prefs.getInt(_kSeedColorValue) ?? _seedColorValue;
+    await _loadKeys(prefs);
     notifyListeners();
+  }
+
+  /// Key 读取 + 一次性迁移：
+  /// 安全存储有值 → 用它，并清掉可能残留的旧明文；
+  /// 安全存储为空而旧 prefs 有值 → 搬进安全存储并删旧明文；
+  /// 安全存储整体不可用 → 用旧明文值兜底（不迁移、不删，留待下次）。
+  Future<void> _loadKeys(SharedPreferences prefs) async {
+    final legacy = {
+      for (final k in _keyFields) k: prefs.getString(k) ?? '',
+    };
+    Map<String, String?>? secureValues;
+    try {
+      secureValues = {
+        for (final k in _keyFields) k: await _secure.read(key: k),
+      };
+    } catch (_) {
+      secureValues = null; // 安全存储不可用：走 legacy 兜底
+    }
+    final resolved = <String, String>{};
+    for (final k in _keyFields) {
+      final secureValue = secureValues?[k];
+      final legacyValue = legacy[k] ?? '';
+      if (secureValue != null && secureValue.isNotEmpty) {
+        resolved[k] = secureValue;
+        if (legacyValue.isNotEmpty) await prefs.remove(k);
+      } else if (legacyValue.isNotEmpty && secureValues != null) {
+        resolved[k] = legacyValue;
+        try {
+          await _secure.write(key: k, value: legacyValue);
+          await prefs.remove(k);
+        } catch (_) {
+          // 迁移失败保留明文原样，下次 load 再试，不丢 Key。
+        }
+      } else {
+        resolved[k] = legacyValue;
+      }
+    }
+    _keys[MapProvider.amap] = resolved[_kKeyAmap] ?? '';
+    _keys[MapProvider.baidu] = resolved[_kKeyBaidu] ?? '';
+    _keys[MapProvider.tencent] = resolved[_kKeyTencent] ?? '';
+    _nvidiaKey = resolved[_kKeyNvidia] ?? '';
+    _amapSdkAndroidKey = resolved[_kAmapSdkAndroidKey] ?? '';
+    _amapSdkIosKey = resolved[_kAmapSdkIosKey] ?? '';
+  }
+
+  /// 写安全存储：空值删除；失败静默（仅内存生效，绝不回退明文）。
+  Future<void> _writeSecure(String storageKey, String value) async {
+    try {
+      if (value.isEmpty) {
+        await _secure.delete(key: storageKey);
+      } else {
+        await _secure.write(key: storageKey, value: value);
+      }
+    } catch (_) {
+      // 安全存储不可用时不落任何明文，Key 只在本次运行内存中有效。
+    }
   }
 
   Future<void> setAmapSdkKeys({
@@ -99,9 +169,8 @@ class SettingsService extends ChangeNotifier {
     _amapSdkAndroidKey = androidKey.trim();
     _amapSdkIosKey = iosKey.trim();
     notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kAmapSdkAndroidKey, _amapSdkAndroidKey);
-    await prefs.setString(_kAmapSdkIosKey, _amapSdkIosKey);
+    await _writeSecure(_kAmapSdkAndroidKey, _amapSdkAndroidKey);
+    await _writeSecure(_kAmapSdkIosKey, _amapSdkIosKey);
   }
 
   Future<void> setPrivacyAgreed(bool value) async {
@@ -121,8 +190,7 @@ class SettingsService extends ChangeNotifier {
   Future<void> setKeyFor(MapProvider provider, String value) async {
     _keys[provider] = value.trim();
     notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_storageKeyFor(provider), value.trim());
+    await _writeSecure(_storageKeyFor(provider), value.trim());
   }
 
   Future<void> setNvidiaVoice(String value) async {
@@ -135,8 +203,7 @@ class SettingsService extends ChangeNotifier {
   Future<void> setNvidiaKey(String value) async {
     _nvidiaKey = value.trim();
     notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kKeyNvidia, value.trim());
+    await _writeSecure(_kKeyNvidia, value.trim());
   }
 
   Future<void> setTtsEngine(TtsEngine value) async {
