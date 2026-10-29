@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../models/geo_point.dart';
 import '../models/map_provider.dart';
@@ -13,6 +14,7 @@ import '../services/places_service.dart';
 import '../services/settings_service.dart';
 import '../services/track_service.dart';
 import '../utils/format.dart';
+import '../utils/share_text.dart';
 import '../widgets/app_map.dart';
 import 'navigation_screen.dart';
 
@@ -693,14 +695,35 @@ class _RouteScreenState extends State<RouteScreen> {
   }
 
   Widget _saveOfflineRow(BuildContext context) {
-    return Align(
-      alignment: Alignment.centerRight,
-      child: TextButton.icon(
-        icon: const Icon(Icons.download_outlined, size: 18),
-        label: const Text('保存离线路线'),
-        onPressed: _selected == null ? null : _saveOffline,
-      ),
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        TextButton.icon(
+          icon: const Icon(Icons.share_outlined, size: 18),
+          label: const Text('分享路线'),
+          onPressed: _selected == null ? null : _shareSelected,
+        ),
+        TextButton.icon(
+          icon: const Icon(Icons.download_outlined, size: 18),
+          label: const Text('保存离线路线'),
+          onPressed: _selected == null ? null : _saveOffline,
+        ),
+      ],
     );
+  }
+
+  void _shareSelected() {
+    final option = _selected;
+    if (option == null) return;
+    SharePlus.instance.share(ShareParams(
+      text: routeShareText(
+        originName: _originPoi.name,
+        destination: _destPoi,
+        mode: _mode,
+        provider: _routeProvider,
+        option: option,
+      ),
+    ));
   }
 
   Widget _ctaRow(BuildContext context) {

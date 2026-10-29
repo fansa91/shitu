@@ -9,6 +9,7 @@ import '../utils/format.dart';
 import '../services/api_exception.dart';
 import '../services/map_data_services.dart';
 import '../services/settings_service.dart';
+import '../services/tts_service.dart';
 
 /// 设置页：数据源单选、Key 管理（用户自填）、申请指南、语音、关于。
 class SettingsScreen extends StatefulWidget {
@@ -117,6 +118,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
       result = '本地格式校验通过（骨架阶段，未发起真实请求）';
     }
     setState(() => _testResults[id] = result);
+  }
+
+  /// 试听：系统引擎直接朗读；英伟达引擎先走预合成探活——
+  /// 不可用则明确提示原因，并用系统语音朗读同一句（不无声失败、
+  /// 不假装是英伟达音色在播）。
+  Future<void> _previewVoice() async {
+    const sample = '前方三百米右转，进入深南大道';
+    if (_settings.ttsEngine == TtsEngine.system) {
+      await SystemTtsService().speak(sample);
+      _snack('正在用系统语音试听');
+      return;
+    }
+    final service = NvidiaTtsService(
+      apiKey: _settings.nvidiaKey,
+      voice: _settings.nvidiaVoice,
+      fallback: SystemTtsService(),
+    );
+    final report = await service.presynthesize(const [sample]);
+    if (!report.available) {
+      await service.speak(sample); // 内部回落系统 TTS 朗读
+      _snack('英伟达合成暂不可用：${report.reason} 已用系统语音试听');
+      return;
+    }
+    await service.speak(sample);
   }
 
   void _copy(String text) {
@@ -298,6 +323,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       subtitle: const Text('算路后提前合成全部播报文案（英伟达引擎）'),
                       value: _settings.ttsPresynthesize,
                       onChanged: _settings.setTtsPresynthesize,
+                    ),
+                    if (_settings.ttsEngine == TtsEngine.nvidia)
+                      ListTile(
+                        title: const Text('英伟达音色'),
+                        subtitle: const Text('Magpie 中文音色，预合成时使用'),
+                        trailing: DropdownButton<String>(
+                          value: _settings.nvidiaVoice,
+                          items: [
+                            for (final name in nvidiaVoiceNames)
+                              DropdownMenuItem(value: name, child: Text(name)),
+                          ],
+                          onChanged: (value) {
+                            if (value != null) {
+                              _settings.setNvidiaVoice(value);
+                            }
+                          },
+                        ),
+                      ),
+                    ListTile(
+                      leading: const Icon(Icons.play_circle_outline),
+                      title: const Text('试听'),
+                      subtitle: const Text('前方三百米右转，进入深南大道'),
+                      onTap: _previewVoice,
                     ),
                   ],
                 ),

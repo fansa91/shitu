@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../models/poi.dart';
 import '../utils/format.dart';
+import '../utils/share_text.dart';
 
 /// POI 详情面板：主页底部半开面板的内容组件。
 class PoiDetailPanel extends StatelessWidget {
@@ -101,11 +103,9 @@ class PoiDetailPanel extends StatelessWidget {
               child: OutlinedButton.icon(
                 icon: const Icon(Icons.share_outlined),
                 label: const Text('分享'),
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('分享功能骨架占位')),
-                  );
-                },
+                onPressed: () => SharePlus.instance.share(
+                  ShareParams(text: poiShareText(poi)),
+                ),
               ),
             ),
             const SizedBox(width: 8),

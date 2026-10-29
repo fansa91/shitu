@@ -17,7 +17,9 @@ import '../services/track_service.dart';
 import '../utils/format.dart';
 import '../widgets/app_map.dart';
 import '../widgets/poi_detail_panel.dart';
+import '../models/nav_track.dart';
 import 'offline_route_screen.dart';
+import 'track_replay_screen.dart';
 import 'route_screen.dart';
 import 'saved_screen.dart';
 import 'search_screen.dart';
@@ -348,7 +350,11 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _openSaved({bool offline = false}) async {
     final result = await Navigator.of(context).push<Object?>(
       MaterialPageRoute(
-        builder: (_) => SavedScreen(places: _places, initialOffline: offline),
+        builder: (_) => SavedScreen(
+          places: _places,
+          tracks: widget.tracks,
+          initialOffline: offline,
+        ),
       ),
     );
     if (!mounted) return;
@@ -359,6 +365,13 @@ class _HomeScreenState extends State<HomeScreen> {
         MaterialPageRoute(
           builder: (_) =>
               OfflineRouteScreen(route: result, settings: _settings),
+        ),
+      );
+    } else if (result is NavTrack) {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) =>
+              TrackReplayScreen(track: result, settings: _settings),
         ),
       );
     }

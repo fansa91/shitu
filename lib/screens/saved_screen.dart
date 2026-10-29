@@ -1,22 +1,27 @@
 import 'package:flutter/material.dart';
 
+import '../models/nav_track.dart';
 import '../models/offline_route.dart';
 import '../models/poi.dart';
 import '../services/places_service.dart';
+import '../services/track_service.dart';
 import '../utils/format.dart';
 
-/// 「收藏 / 离线路线」列表页（主页快捷入口打开）。
+/// 「收藏 / 离线路线 / 轨迹」列表页（主页快捷入口打开）。
 ///
 /// 点收藏条目 → 以该 [Poi] 关闭本页回主页（主页负责移图开面板）；
-/// 点离线路线 → 以该 [OfflineRoute] 关闭本页（主页负责打开详情页）。
+/// 点离线路线 → 以该 [OfflineRoute] 关闭本页（主页负责打开详情页）；
+/// 点轨迹 → 以该 [NavTrack] 关闭本页（主页负责打开回放页）。
 class SavedScreen extends StatefulWidget {
   const SavedScreen({
     super.key,
     required this.places,
+    required this.tracks,
     this.initialOffline = false,
   });
 
   final PlacesService places;
+  final TrackService tracks;
 
   /// true 时默认停在「离线路线」页签。
   final bool initialOffline;
@@ -33,7 +38,7 @@ class _SavedScreenState extends State<SavedScreen>
   void initState() {
     super.initState();
     _tabs = TabController(
-      length: 2,
+      length: 3,
       vsync: this,
       initialIndex: widget.initialOffline ? 1 : 0,
     );
@@ -55,14 +60,19 @@ class _SavedScreenState extends State<SavedScreen>
           tabs: const [
             Tab(icon: Icon(Icons.star_border), text: '收藏'),
             Tab(icon: Icon(Icons.alt_route), text: '离线路线'),
+            Tab(icon: Icon(Icons.route_outlined), text: '轨迹'),
           ],
         ),
       ),
       body: ListenableBuilder(
-        listenable: widget.places,
+        listenable: Listenable.merge([widget.places, widget.tracks]),
         builder: (context, _) => TabBarView(
           controller: _tabs,
-          children: [_favoritesTab(context), _offlineTab(context)],
+          children: [
+            _favoritesTab(context),
+            _offlineTab(context),
+            _tracksTab(context),
+          ],
         ),
       ),
     );
@@ -142,6 +152,45 @@ class _SavedScreenState extends State<SavedScreen>
             onPressed: () => widget.places.removeOfflineRoute(route.id),
           ),
           onTap: () => Navigator.of(context).pop<OfflineRoute>(route),
+        );
+      },
+    );
+  }
+
+  Widget _tracksTab(BuildContext context) {
+    final tracks = widget.tracks.tracks;
+    if (tracks.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            '还没有保存的轨迹。\n导航到达或结束时点「保存轨迹」就会出现在这里。',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+    return ListView.builder(
+      itemCount: tracks.length,
+      itemBuilder: (context, index) {
+        final track = tracks[index];
+        final started =
+            DateTime.fromMillisecondsSinceEpoch(track.startedAtMs);
+        return ListTile(
+          leading: const Icon(Icons.route_outlined),
+          title: Text(track.name,
+              maxLines: 1, overflow: TextOverflow.ellipsis),
+          subtitle: Text(
+            '${formatDistance(track.distanceMeters)} · '
+            '${formatDuration(track.durationSeconds)} · '
+            '${started.month}月${started.day}日 ${formatClock(started)}',
+          ),
+          trailing: IconButton(
+            icon: const Icon(Icons.delete_outline),
+            tooltip: '删除',
+            onPressed: () => widget.tracks.remove(track.id),
+          ),
+          onTap: () => Navigator.of(context).pop<NavTrack>(track),
         );
       },
     );
