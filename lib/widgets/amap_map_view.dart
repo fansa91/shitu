@@ -4,8 +4,10 @@ import 'package:x_amap_base/x_amap_base.dart';
 
 import '../models/geo_point.dart';
 import '../models/poi.dart';
+import '../services/amap_sdk_service.dart';
 import '../services/settings_service.dart';
 import 'app_map.dart';
+import 'fake_map.dart';
 
 /// 真实高德地图（社区维护 fork `amap_map`，基于官方插件演进）。
 /// 只在隐私已同意、SDK 已就绪、当前平台 Key 已填时由 AppMap 选用。
@@ -52,7 +54,9 @@ class AmapMapView extends StatefulWidget {
 
 class _AmapMapViewState extends State<AmapMapView> {
   AMapController? _controller;
-  bool _pluginInitialized = false;
+
+  /// 插件初始化门控 Future：成功后才允许创建 AMapWidget（见 initState）。
+  late final Future<bool> _initFuture;
 
   /// 最近一次已知的缩放（onCameraMoveEnd 回报），命令未指定 zoom 时沿用。
   double _lastZoom = 12;
@@ -63,10 +67,21 @@ class _AmapMapViewState extends State<AmapMapView> {
 
   LatLng _toLatLng(GeoPoint p) => LatLng(p.latitude, p.longitude);
 
-  /// 在 AMapWidget 构建前把运行时 Key 与隐私同意状态注入插件。
-  void _initPlugin() {
-    if (_pluginInitialized) return;
-    _pluginInitialized = true;
+  @override
+  void initState() {
+    super.initState();
+    // 冷启动加固：不在 build() 里做初始化副作用。插件初始化经
+    // AmapSdkService 的门控单飞执行，完成前绝不创建 AMapWidget，
+    // 消除「冷启动带着已存 Key 直达建图」时初始化与建图的竞态；
+    // Key 变化时 AppMap 用 ValueKey 换掉本 State，旧图先销毁再走新一轮。
+    _initFuture = AmapSdkService.instance.runPluginInit(
+      widget.settings,
+      () async => _doPluginInit(),
+    );
+  }
+
+  /// 把运行时 Key 与隐私同意状态注入插件（由门控保证同一 Key 只跑一次）。
+  void _doPluginInit() {
     AMapInitializer.updatePrivacyAgree(
       const AMapPrivacyStatement(
         hasContains: true,
@@ -168,7 +183,63 @@ class _AmapMapViewState extends State<AmapMapView> {
 
   @override
   Widget build(BuildContext context) {
-    _initPlugin();
+    return FutureBuilder<bool>(
+      future: _initFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const ColoredBox(
+            color: Color(0xFFE8EEF4),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 12),
+                  Text('地图加载中…'),
+                ],
+              ),
+            ),
+          );
+        }
+        if (snapshot.data == true) return _buildRealMap(context);
+        return _buildInitFallback();
+      },
+    );
+  }
+
+  /// 插件初始化失败：回落示意地图 + 顶部横幅写明原因（含诊断信息，
+  /// 方便用户反馈时直接报出来），不白屏、不连累页面其他功能。
+  Widget _buildInitFallback() {
+    final reason = AmapSdkService.instance.lastInitError ?? '未知原因';
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: FakeMap(
+            showRoute: widget.selectedRoutePoints.isNotEmpty,
+            showDestinationPin: widget.selectedPoi != null,
+          ),
+        ),
+        Positioned(
+          top: 8,
+          left: 8,
+          right: 8,
+          child: Material(
+            color: Colors.amber.shade100,
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Text(
+                '高德地图加载失败，已切换示意地图。原因：$reason',
+                style: const TextStyle(fontSize: 12, color: Colors.black87),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRealMap(BuildContext context) {
     final markers = <Marker>{
       if (widget.selectedPoi?.location != null)
         Marker(

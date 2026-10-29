@@ -88,6 +88,8 @@ class AppMap extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!dark && AmapSdkService.instance.canShowRealMap(settings)) {
       return AmapMapView(
+        // Key 变化 → 换掉旧 State/平台视图，先销毁旧图再按新 Key 初始化。
+        key: ValueKey('amap-${AmapSdkService.instance.keyIdFor(settings)}'),
         settings: settings,
         selectedPoi: selectedPoi,
         selectedRoutePoints: selectedRoutePoints,

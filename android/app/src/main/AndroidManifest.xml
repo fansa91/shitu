@@ -4,10 +4,14 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- allowNativeHeapPointerTagging=false：amap_map 插件 README 的已知问题——
+         targetSdk>=30 时高德原生 SDK 在开启堆指针标记的设备上创建地图会闪退，
+         插件 example 与 FAQ 均要求关闭。 -->
     <application
         android:label="识途"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowNativeHeapPointerTagging="false">
         <!-- 高德定位服务声明（地图 SDK 定位蓝点依赖）。SDK Key 不写在这里：
              由 App 在运行时从设置读取，经 AMapWidget 的 apiKey 参数传入。 -->
         <service android:name="com.amap.api.location.APSService" />
@@ -48,6 +52,11 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- flutter_tts 官方要求：Android 11+ 包可见性——不声明则系统 TTS
+             引擎不可见，getEngines 为空、播报无声。 -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE"/>
         </intent>
     </queries>
 </manifest>
