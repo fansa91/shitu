@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../models/map_provider.dart';
+import '../utils/format.dart';
 import '../services/api_exception.dart';
 import '../services/map_data_services.dart';
 import '../services/settings_service.dart';
@@ -40,6 +42,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _nvidiaController.text = _settings.nvidiaKey;
     _sdkAndroidController.text = _settings.amapSdkAndroidKey;
     _sdkIosController.text = _settings.amapSdkIosKey;
+    _loadVersion();
+  }
+
+  /// 「关于」版本号：运行时读构建信息（pubspec / CI tag 注入），不在代码里写死。
+  String? _versionText;
+
+  Future<void> _loadVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (!mounted) return;
+      setState(
+          () => _versionText = formatAppVersion(info.version, info.buildNumber));
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _versionText = '版本未知');
+    }
   }
 
   @override
@@ -209,10 +227,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
               _sectionTitle('关于'),
-              const Card(
+              Card(
                 child: ListTile(
-                  title: Text('识途'),
-                  subtitle: Text('版本跟随构建版本（由 tag / CI 注入，不硬编码）'),
+                  title: const Text('识途'),
+                  subtitle: Text(_versionText ?? '版本加载中…'),
                 ),
               ),
             ],

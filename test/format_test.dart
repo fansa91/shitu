@@ -36,4 +36,13 @@ void main() {
       expect(formatClock(DateTime(2026, 10, 29, 9, 5)), '09:05');
     });
   });
+
+  group('formatAppVersion', () {
+    test('带构建号', () {
+      expect(formatAppVersion('0.1.0', '1'), '版本 0.1.0（构建 1）');
+    });
+    test('无构建号只显示版本', () {
+      expect(formatAppVersion('0.1.0', ''), '版本 0.1.0');
+    });
+  });
 }
