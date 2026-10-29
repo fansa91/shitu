@@ -15,6 +15,20 @@
         <!-- 高德定位服务声明（地图 SDK 定位蓝点依赖）。SDK Key 不写在这里：
              由 App 在运行时从设置读取，经 AMapWidget 的 apiKey 参数传入。 -->
         <service android:name="com.amap.api.location.APSService" />
+        <!-- v0.2.3 二分修复之一：关闭 Impeller，回退 Skia 渲染。
+             背景：Flutter 3.47 默认 Impeller 与高德 TextureMapView 的
+             自有 GL 渲染互操作，在一加 7 Pro（Android 10）上于原生建图
+             期间崩溃（v0.2.2 面包屑实锤：停在「地图创建开始」与
+             onMapCreated 之间，SDK 初始化已完成、签名校验排除）。
+             先关 Impeller 做二分验证。写法依据 Flutter 官方文档
+             《Impeller rendering engine》：部署时关闭 Android Impeller
+             即在 <application> 下加本 meta-data；Impeller 对 Android
+             API 29+ 默认启用（Android 10 = API 29，命中默认路径），
+             不需要改 MainActivity 或 gradle 属性。回滚：删除本
+             meta-data 即恢复默认 Impeller，本项与 Dart 侧改动独立。 -->
+        <meta-data
+            android:name="io.flutter.embedding.android.EnableImpeller"
+            android:value="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

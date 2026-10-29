@@ -4,6 +4,7 @@ import 'package:x_amap_base/x_amap_base.dart';
 
 import '../models/geo_point.dart';
 import '../models/poi.dart';
+import '../services/amap_map_params.dart';
 import '../services/amap_sdk_service.dart';
 import '../services/map_crash_guard.dart';
 import '../services/settings_service.dart';
@@ -74,6 +75,11 @@ class _AmapMapViewState extends State<AmapMapView> {
 
   /// 「地图创建开始」面包屑只落一次（build 可能多次执行）。
   bool _createMarked = false;
+
+  /// 两段式建图的就绪门控：onMapCreated 到达前，AMapWidget 只带
+  /// 裸创建参数（见 [resolveAmapMapStageParams]）；到达后置 true，
+  /// 经一次重建把叠加物与完整图层配置下发。
+  bool _created = false;
 
   /// 程序主动移动相机的目标点。相机停稳后若实际中心明显偏离它，
   /// 判定为用户手动拖图（触发 onUserDragged，用于解除跟随锁定）。
@@ -269,6 +275,13 @@ class _AmapMapViewState extends State<AmapMapView> {
   }
 
   Widget _buildRealMap(BuildContext context) {
+    // 两段式下发参数：创建段（_created 前）只裸创建，就绪段下发全量。
+    final stage = resolveAmapMapStageParams(
+      created: _created,
+      compatMode: widget.compatMode,
+      trafficEnabled: widget.trafficEnabled,
+      tilt: widget.tilt,
+    );
     final markers = <Marker>{
       if (widget.selectedPoi?.location != null)
         Marker(
@@ -306,34 +319,39 @@ class _AmapMapViewState extends State<AmapMapView> {
         (widget.selectedRoutePoints.isNotEmpty
             ? widget.selectedRoutePoints.first
             : null);
+    final initialTarget = focus != null
+        ? _toLatLng(focus)
+        : const LatLng(22.54554, 114.05769); // 深圳市中心
     // 面包屑：即将把创建参数交给原生 TextureMapView——原生崩溃最可能
     // 发生在这一步到 onMapCreated 之间，序列停在这里即指向该窗口。
     if (!_createMarked) {
       _createMarked = true;
       widget.crashGuard?.markStep(MapBreadcrumbStep.mapCreateStart);
     }
-    final compat = widget.compatMode;
     return AMapWidget(
+      // 创建段最简初始相机：只有目标 + 缩放，倾斜/方位归 0；
+      // 就绪段插件不再重读此参数，倾斜在 onMapCreated 里用相机命令补。
       initialCameraPosition: CameraPosition(
-        target: focus != null
-            ? _toLatLng(focus)
-            : const LatLng(22.54554, 114.05769), // 深圳市中心
+        target: initialTarget,
         zoom: 12,
-        tilt: compat ? 0 : widget.tilt,
+        tilt: stage.initialTilt,
       ),
       // 关闭 SDK 自带蓝点：位置由 geolocator 提供并自绘标记，避免双蓝点。
-      myLocationStyleOptions: MyLocationStyleOptions(false),
+      // 创建段不下发定位样式（保持裸创建），就绪段再下发。
+      myLocationStyleOptions:
+          stage.myLocationStyleEnabled ? MyLocationStyleOptions(false) : null,
       // 兼容模式：关掉一切可选渲染项（建筑/路况/指南针/比例尺/标注/
-      // POI 点击），只留最基础的底图；手势保持插件默认不动。
+      // POI 点击），只留最基础的底图；手势保持插件默认不动，
+      // 创建段与就绪段一致（插件默认全开，本工程从不覆写）。
       // 注：插件 1.0.15 未公开室内图/缩放控件开关，无从设置。
-      trafficEnabled: compat ? false : widget.trafficEnabled,
-      buildingsEnabled: compat ? false : widget.tilt > 0,
+      trafficEnabled: stage.trafficEnabled,
+      buildingsEnabled: stage.buildingsEnabled,
       compassEnabled: false,
-      scaleEnabled: !compat,
-      labelsEnabled: !compat,
-      touchPoiEnabled: !compat,
-      markers: markers,
-      polylines: polylines,
+      scaleEnabled: stage.scaleEnabled,
+      labelsEnabled: stage.labelsEnabled,
+      touchPoiEnabled: stage.touchPoiEnabled,
+      markers: stage.overlaysEnabled ? markers : const <Marker>{},
+      polylines: stage.overlaysEnabled ? polylines : const <Polyline>{},
       onCameraMoveEnd: _onCameraMoveEnd,
       onMapCreated: (controller) {
         widget.crashGuard?.markStep(MapBreadcrumbStep.onMapCreated);
@@ -357,6 +375,18 @@ class _AmapMapViewState extends State<AmapMapView> {
             _toLatLng(widget.selectedPoi!.location!),
             15,
           ));
+        } else if (widget.tilt > 0) {
+          // 裸创建时初始相机倾斜被归 0：无路线/POI 抢相机时，在这里
+          // 把业务倾斜（如主页 3D 模式）用相机命令补回来，保持旧行为。
+          _expectedTarget = initialTarget;
+          controller.moveCamera(CameraUpdate.newCameraPosition(
+            CameraPosition(target: initialTarget, zoom: 12, tilt: widget.tilt),
+          ));
+        }
+        // 迈过原生创建窗口：置就绪门控，触发一次重建把完整参数集
+        // （叠加物、图层、定位样式）下发，插件经 didUpdateWidget 生效。
+        if (mounted && !_created) {
+          setState(() => _created = true);
         }
       },
     );
