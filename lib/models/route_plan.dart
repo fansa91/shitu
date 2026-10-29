@@ -12,10 +12,15 @@ class RouteOption {
     required this.provider,
     this.recommended = false,
     this.points = const [],
+    this.steps = const [],
   });
 
   /// 路线折线点（GCJ-02），地图上绘制用；示例数据可为空。
   final List<GeoPoint> points;
+
+  /// 分步导航文案（如「沿深南大道向东行驶 1.2 公里」），离线路线展示用；
+  /// 服务商未返回时为空。
+  final List<String> steps;
 
   /// 预计时长（秒）。
   final int durationSeconds;

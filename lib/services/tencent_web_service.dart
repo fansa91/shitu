@@ -110,6 +110,12 @@ List<RouteOption> parseTencentRouteJson(
       if ((raw['restriction'] as Map<String, dynamic>?)?['status'] == 0)
         '无限制',
     ];
+    final steps = <String>[
+      for (final step in (raw['steps'] as List? ?? const [])
+          .whereType<Map<String, dynamic>>())
+        if ((step['instruction']?.toString() ?? '').isNotEmpty)
+          step['instruction'].toString(),
+    ];
     options.add(RouteOption(
       durationSeconds: (((raw['duration'] as num?)?.toDouble() ?? 0) * 60).round(),
       distanceMeters: (raw['distance'] as num?)?.toDouble() ?? 0,
@@ -119,9 +125,17 @@ List<RouteOption> parseTencentRouteJson(
       provider: MapProvider.tencent,
       recommended: options.isEmpty,
       points: points,
+      steps: steps,
     ));
   }
   return options;
+}
+
+/// 解析腾讯逆地理编码响应 → 格式化地址（纯函数，供单测）。
+String? parseTencentRegeoJson(Map<String, dynamic> json) {
+  final result = _ensureTencentOk(json);
+  final address = result['address']?.toString() ?? '';
+  return address.isEmpty ? null : address;
 }
 
 /// 腾讯 Web 服务真实实现。返回坐标即 GCJ-02，无需转换。
@@ -173,6 +187,19 @@ class TencentWebService implements MapDataService {
       providerName: _providerName,
     );
     return parseTencentSearchJson(json);
+  }
+
+  @override
+  Future<String?> reverseGeocode(GeoPoint point, MapProvider provider) async {
+    try {
+      final json = await _api.getJson(
+        _uri('/ws/geocoder/v1/', {'location': _latLng(point)}),
+        providerName: _providerName,
+      );
+      return parseTencentRegeoJson(json);
+    } catch (_) {
+      return null; // 逆地理只是补地名，失败不打断定位主流程
+    }
   }
 
   @override

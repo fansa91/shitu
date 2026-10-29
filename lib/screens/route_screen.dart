@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../models/geo_point.dart';
 import '../models/map_provider.dart';
+import '../models/offline_route.dart';
 import '../models/poi.dart';
 import '../models/route_plan.dart';
 import '../services/api_exception.dart';
+import '../services/location_service.dart';
 import '../services/map_data_services.dart';
+import '../services/places_service.dart';
 import '../services/settings_service.dart';
 import '../utils/format.dart';
 import '../widgets/app_map.dart';
@@ -13,7 +16,8 @@ import 'navigation_screen.dart';
 
 /// 路线规划页：起终点（Poi 驱动）+ 出行方式切换 + 双路线同显 + 多方案卡。
 ///
-/// 起点文本被修改后，先走当前服务商搜索取首个结果的坐标再算路；
+/// 起点默认取设备 GPS 位置（坐标直接算路，逆地理补地名）；
+/// 也可切换为文本输入，文本修改后先走当前服务商搜索取首个结果的坐标再算路；
 /// 宽度 >=900 时左栏放操作区、右栏放地图。
 class RouteScreen extends StatefulWidget {
   const RouteScreen({
@@ -21,37 +25,50 @@ class RouteScreen extends StatefulWidget {
     required this.destination,
     required this.settings,
     required this.services,
+    required this.places,
   });
 
   final Poi destination;
   final SettingsService settings;
   final MapDataServices services;
+  final PlacesService places;
 
   @override
   State<RouteScreen> createState() => _RouteScreenState();
 }
 
 class _RouteScreenState extends State<RouteScreen> {
+  static const _gpsPoiId = 'gps-my-location';
   static const _myLocationPoi = Poi(
-    id: 'origin-my-location',
+    id: _gpsPoiId,
     name: '我的位置',
     address: '',
-    category: '起点',
+    category: '我的位置',
   );
 
-  final _originController = TextEditingController(text: '我的位置');
+  final _originController = TextEditingController();
+  final _locationService = LocationService();
   late Poi _originPoi = _myLocationPoi;
   late Poi _destPoi = widget.destination;
+
+  /// 起点是否处于文本输入模式（false = 用已解析的 Poi，含 GPS 起点）。
+  bool _originUseText = false;
+
+  /// 正在取 GPS 位置（进页自动尝试 / 手动点定位按钮）。
+  bool _gpsBusy = true;
+
   TransportMode _mode = TransportMode.driving;
   late MapProvider _routeProvider = widget.settings.provider;
-  late Future<RoutePlan> _planFuture;
+  Future<RoutePlan>? _planFuture;
   RoutePlan? _plan;
   RouteOption? _selected;
+
+  bool get _originIsGps => _originPoi.id == _gpsPoiId;
 
   @override
   void initState() {
     super.initState();
-    _reload();
+    _initGpsOrigin();
   }
 
   @override
@@ -60,10 +77,87 @@ class _RouteScreenState extends State<RouteScreen> {
     super.dispose();
   }
 
-  /// 起点文本与已解析的起点不一致时，先搜索解析坐标（取首个结果）。
+  void _snack(String message) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// 进页先尝试以 GPS 位置为起点（成功直接算路，失败转文本输入模式）。
+  Future<void> _initGpsOrigin() async {
+    final poi = await _resolveGpsPoi(showError: false);
+    if (!mounted) return;
+    setState(() {
+      _gpsBusy = false;
+      if (poi != null) {
+        _originPoi = poi;
+        _originUseText = false;
+      } else {
+        _originUseText = true;
+      }
+    });
+    _reload();
+  }
+
+  /// 取设备位置并组装成「我的位置」Poi：坐标走 GPS（已转 GCJ-02），
+  /// 地名用当前数据源逆地理编码补；无 Key / 失败时地址留空，
+  /// UI 显示「我的位置（定位坐标）」。失败返回 null。
+  Future<Poi?> _resolveGpsPoi({required bool showError}) async {
+    try {
+      final point = await _locationService.currentLocation();
+      final address = await widget.services
+          .serviceFor(_routeProvider)
+          .reverseGeocode(point, _routeProvider);
+      return Poi(
+        id: _gpsPoiId,
+        name: '我的位置',
+        address: address ?? '',
+        category: '我的位置',
+        location: point,
+      );
+    } on LocationException catch (e) {
+      if (showError && mounted) _snack(e.message);
+      return null;
+    }
+  }
+
+  Future<void> _useGpsOrigin() async {
+    setState(() => _gpsBusy = true);
+    final poi = await _resolveGpsPoi(showError: true);
+    if (!mounted) return;
+    setState(() {
+      _gpsBusy = false;
+      if (poi != null) {
+        _originPoi = poi;
+        _originUseText = false;
+      }
+    });
+    if (poi != null) _reload();
+  }
+
+  Future<void> _useGpsDestination() async {
+    setState(() => _gpsBusy = true);
+    final poi = await _resolveGpsPoi(showError: true);
+    if (!mounted) return;
+    setState(() {
+      _gpsBusy = false;
+      if (poi != null) _destPoi = poi;
+    });
+    if (poi != null) _reload();
+  }
+
+  /// 起点解析：已解析的 Poi（含 GPS 起点）有坐标且文本未被改动时，
+  /// 直接用其坐标算路，不再走文本搜索；文本被改动时才搜索取首个结果。
   Future<Poi> _resolveOrigin() async {
     final text = _originController.text.trim();
-    if (text.isEmpty || text == _originPoi.name) return _originPoi;
+    if (text.isEmpty || text == _originPoi.name) {
+      if (_originPoi.location == null) {
+        throw const MapApiException(
+          MapApiErrorKind.precondition,
+          '起点还没有坐标：点定位按钮用「我的位置」，或输入具体地点后回车',
+        );
+      }
+      return _originPoi;
+    }
     final results = await widget.services
         .serviceFor(_routeProvider)
         .searchSuggestions(text, _routeProvider);
@@ -78,14 +172,17 @@ class _RouteScreenState extends State<RouteScreen> {
   }
 
   void _reload() {
-    _planFuture = _loadPlan();
-    _planFuture.then((plan) {
+    final future = _loadPlan();
+    _planFuture = future;
+    future.then((plan) {
       if (mounted) {
         setState(() {
           _plan = plan;
           _selected =
               plan.options.where((o) => o.recommended).firstOrNull ??
                   plan.options.firstOrNull;
+          // 起点已解析出坐标后回落到 Poi 展示模式（含 GPS 起点）。
+          if (_originPoi.location != null) _originUseText = false;
         });
       }
     }).onError((_, _) {
@@ -109,8 +206,32 @@ class _RouteScreenState extends State<RouteScreen> {
       _originPoi = _destPoi;
       _destPoi = tmpPoi;
       _originController.text = _originPoi.name;
+      _originUseText = _originPoi.location == null;
     });
     _reload();
+  }
+
+  /// 把当前选中方案保存为离线路线（仅路线数据，底图不保存）。
+  Future<void> _saveOffline() async {
+    final option = _selected;
+    if (option == null) return;
+    final route = OfflineRoute(
+      id: 'route-${DateTime.now().millisecondsSinceEpoch}',
+      originName: _originPoi.name,
+      destinationName: _destPoi.name,
+      mode: _mode,
+      provider: _routeProvider,
+      durationSeconds: option.durationSeconds,
+      distanceMeters: option.distanceMeters,
+      strategyTags: option.strategyTags,
+      points: option.points,
+      steps: option.steps,
+      savedAtMs: DateTime.now().millisecondsSinceEpoch,
+      originPoint: _originPoi.location,
+      destinationPoint: _destPoi.location,
+    );
+    await widget.places.saveOfflineRoute(route);
+    if (mounted) _snack('已保存到「离线路线」（仅含路线数据，底图需联网）');
   }
 
   void _startNavigation({required bool simulated}) {
@@ -194,6 +315,7 @@ class _RouteScreenState extends State<RouteScreen> {
         _schemeArea(context),
         const SizedBox(height: 10),
         _ctaRow(context),
+        _saveOfflineRow(context),
       ],
     );
     return Material(
@@ -219,10 +341,17 @@ class _RouteScreenState extends State<RouteScreen> {
             _schemeArea(context),
             const SizedBox(height: 10),
             _ctaRow(context),
+            _saveOfflineRow(context),
           ],
         ),
       ),
     );
+  }
+
+  /// 起点行标题文案：GPS 起点无逆地理地址时如实显示「我的位置（定位坐标）」。
+  String get _originTitle {
+    if (_originIsGps && _originPoi.address.isEmpty) return '我的位置（定位坐标）';
+    return _originPoi.name;
   }
 
   Widget _originDestinationCard(BuildContext context) {
@@ -239,18 +368,75 @@ class _RouteScreenState extends State<RouteScreen> {
                 const Icon(Icons.circle, size: 10, color: Color(0xFF34A853)),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: TextField(
-                    controller: _originController,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      border: InputBorder.none,
-                      hintText: '输入起点（回车搜索解析）',
-                    ),
-                    style: theme.textTheme.bodyLarge,
-                    textInputAction: TextInputAction.search,
-                    onSubmitted: (_) => setState(_reload),
-                  ),
+                  child: _originUseText
+                      ? TextField(
+                          controller: _originController,
+                          decoration: const InputDecoration(
+                            isDense: true,
+                            border: InputBorder.none,
+                            hintText: '输入起点（回车搜索解析）',
+                          ),
+                          style: theme.textTheme.bodyLarge,
+                          textInputAction: TextInputAction.search,
+                          onSubmitted: (_) => setState(_reload),
+                        )
+                      : InkWell(
+                          onTap: () {
+                            setState(() {
+                              _originUseText = true;
+                              _originController.text = _originIsGps
+                                  ? ''
+                                  : _originPoi.name;
+                            });
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    if (_originIsGps) ...[
+                                      Icon(Icons.my_location,
+                                          size: 16,
+                                          color: theme.colorScheme.primary),
+                                      const SizedBox(width: 4),
+                                    ],
+                                    Expanded(
+                                      child: Text(
+                                        _originTitle,
+                                        style: theme.textTheme.bodyLarge,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                if (_originPoi.address.isNotEmpty)
+                                  Text(
+                                    _originPoi.address,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color:
+                                          theme.colorScheme.onSurfaceVariant,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
                 ),
+                if (_gpsBusy)
+                  const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2.4),
+                  )
+                else if (_originUseText)
+                  IconButton(
+                    icon: const Icon(Icons.my_location),
+                    tooltip: '用我的位置作起点',
+                    onPressed: _useGpsOrigin,
+                  ),
                 IconButton(
                   icon: const Icon(Icons.swap_vert),
                   tooltip: '交换起终点',
@@ -263,11 +449,32 @@ class _RouteScreenState extends State<RouteScreen> {
                 const Icon(Icons.square, size: 9, color: Color(0xFFE8453C)),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text(
-                    _destPoi.name,
-                    style: theme.textTheme.bodyLarge,
-                    overflow: TextOverflow.ellipsis,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _destPoi.id == _gpsPoiId &&
+                                _destPoi.address.isEmpty
+                            ? '我的位置（定位坐标）'
+                            : _destPoi.name,
+                        style: theme.textTheme.bodyLarge,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (_destPoi.address.isNotEmpty)
+                        Text(
+                          _destPoi.address,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    ],
                   ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.my_location),
+                  tooltip: '用我的位置作终点',
+                  onPressed: _useGpsDestination,
                 ),
                 IconButton(
                   icon: const Icon(Icons.refresh),
@@ -330,6 +537,23 @@ class _RouteScreenState extends State<RouteScreen> {
         FutureBuilder<RoutePlan>(
           future: _planFuture,
           builder: (context, snapshot) {
+            if (_planFuture == null) {
+              return const Padding(
+                padding: EdgeInsets.all(16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2.4),
+                    ),
+                    SizedBox(width: 10),
+                    Text('正在定位起点…'),
+                  ],
+                ),
+              );
+            }
             if (snapshot.hasError) {
               final error = snapshot.error;
               final message = error is MapApiException
@@ -431,6 +655,17 @@ class _RouteScreenState extends State<RouteScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _saveOfflineRow(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerRight,
+      child: TextButton.icon(
+        icon: const Icon(Icons.download_outlined, size: 18),
+        label: const Text('保存离线路线'),
+        onPressed: _selected == null ? null : _saveOffline,
       ),
     );
   }

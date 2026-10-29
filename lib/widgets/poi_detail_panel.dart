@@ -11,12 +11,24 @@ class PoiDetailPanel extends StatelessWidget {
     required this.onClose,
     required this.onNavigate,
     this.scrollController,
+    this.isFavorite = false,
+    this.onToggleFavorite,
+    this.onSetAsHome,
+    this.onSetAsWork,
   });
 
   final Poi poi;
   final VoidCallback onClose;
   final VoidCallback onNavigate;
   final ScrollController? scrollController;
+
+  /// 当前 POI 是否已收藏（决定收藏按钮的填充态与文案）。
+  final bool isFavorite;
+
+  /// 收藏切换；为 null 时按钮回退旧占位行为（不应发生于主页接线后）。
+  final VoidCallback? onToggleFavorite;
+  final VoidCallback? onSetAsHome;
+  final VoidCallback? onSetAsWork;
 
   @override
   Widget build(BuildContext context) {
@@ -78,13 +90,10 @@ class PoiDetailPanel extends StatelessWidget {
           children: [
             Expanded(
               child: OutlinedButton.icon(
-                icon: const Icon(Icons.star_border),
-                label: const Text('收藏'),
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('已收藏（骨架占位）')),
-                  );
-                },
+                icon: Icon(isFavorite ? Icons.star : Icons.star_border,
+                    color: isFavorite ? Colors.amber.shade700 : null),
+                label: Text(isFavorite ? '已收藏' : '收藏'),
+                onPressed: onToggleFavorite,
               ),
             ),
             const SizedBox(width: 8),
@@ -105,6 +114,25 @@ class PoiDetailPanel extends StatelessWidget {
                 icon: const Icon(Icons.directions),
                 label: const Text('去这里'),
                 onPressed: onNavigate,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            Expanded(
+              child: TextButton.icon(
+                icon: const Icon(Icons.home_outlined, size: 18),
+                label: const Text('设为家'),
+                onPressed: onSetAsHome,
+              ),
+            ),
+            Expanded(
+              child: TextButton.icon(
+                icon: const Icon(Icons.work_outlined, size: 18),
+                label: const Text('设为公司'),
+                onPressed: onSetAsWork,
               ),
             ),
           ],

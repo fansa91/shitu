@@ -138,4 +138,52 @@ void main() {
       );
     });
   });
+
+  group('分步文案与逆地理编码', () {
+    test('高德驾车：steps 提取 instruction', () {
+      final options = parseAmapDrivingJson(
+        _fixture('amap_driving.json'),
+        strategyTag: '速度优先',
+      );
+      expect(options.first.steps, isNotEmpty);
+      expect(options.first.steps.first, '向东出发');
+    });
+
+    test('百度驾车：steps 提取 instructions 并去 HTML', () {
+      final options = parseBaiduRouteJson(
+        _fixture('baidu_driving.json'),
+        mode: TransportMode.driving,
+      );
+      expect(options.first.steps, isNotEmpty);
+      expect(options.first.steps.first, '向东出发');
+      expect(stripHtmlTags('沿<b>深南大道</b>行驶'), '沿深南大道行驶');
+    });
+
+    test('高德逆地理：取 formatted_address', () {
+      final address = parseAmapRegeoJson({
+        'status': '1',
+        'infocode': '10000',
+        'regeocode': {'formatted_address': '广东省深圳市南山区科技园'},
+      });
+      expect(address, '广东省深圳市南山区科技园');
+      expect(parseAmapRegeoJson({'status': '1', 'regeocode': {}}), isNull);
+    });
+
+    test('百度逆地理：取 result.formatted_address', () {
+      final address = parseBaiduRegeoJson({
+        'status': 0,
+        'result': {'formatted_address': '广东省深圳市南山区科苑路'},
+      });
+      expect(address, '广东省深圳市南山区科苑路');
+    });
+
+    test('腾讯逆地理：取 result.address', () {
+      final address = parseTencentRegeoJson({
+        'status': 0,
+        'message': 'query ok',
+        'result': {'address': '广东省深圳市南山区科苑南路'},
+      });
+      expect(address, '广东省深圳市南山区科苑南路');
+    });
+  });
 }

@@ -41,6 +41,7 @@ dependencies:
   x_amap_base: ^1.0.3
   package_info_plus: ^10.2.2
   url_launcher: ^6.3.3
+  geolocator: ^14.1.2
 dependency_overrides:
   # amap_map 1.0.15 的 android/build.gradle 写死 compileSdk 35；
   # flutter_plugin_android_lifecycle 2.0.29+ 改用 flutter.compileSdkVersion(36)，

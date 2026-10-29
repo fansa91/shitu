@@ -89,6 +89,19 @@ GeoPoint? _parseAmapLocation(String text) {
   return GeoPoint(latitude: lat, longitude: lng);
 }
 
+/// 从 steps 里收集折线点与分步文案（高德各算路接口 steps 结构一致）。
+({List<GeoPoint> points, List<String> steps}) _collectAmapSteps(Object? raw) {
+  final points = <GeoPoint>[];
+  final steps = <String>[];
+  for (final step in (raw as List? ?? const [])
+      .whereType<Map<String, dynamic>>()) {
+    points.addAll(parseAmapPolyline(step['polyline']?.toString() ?? ''));
+    final instruction = step['instruction']?.toString() ?? '';
+    if (instruction.isNotEmpty) steps.add(instruction);
+  }
+  return (points: points, steps: steps);
+}
+
 /// 解析驾车响应中的 paths（一个 strategy 一次请求）→ 方案列表。
 List<RouteOption> parseAmapDrivingJson(
   Map<String, dynamic> json, {
@@ -100,20 +113,20 @@ List<RouteOption> parseAmapDrivingJson(
   if (paths is! List) return const [];
   return [
     for (final raw in paths.whereType<Map<String, dynamic>>())
-      RouteOption(
-        durationSeconds: _asInt(raw['duration']),
-        distanceMeters: _asDouble(raw['distance']),
-        tollYuan: _asInt(raw['tolls']),
-        trafficLights: _asInt(raw['traffic_lights']),
-        strategyTags: [strategyTag],
-        provider: MapProvider.amap,
-        recommended: recommended,
-        points: [
-          for (final step in (raw['steps'] as List? ?? const [])
-              .whereType<Map<String, dynamic>>())
-            ...parseAmapPolyline(step['polyline']?.toString() ?? ''),
-        ],
-      ),
+      () {
+        final collected = _collectAmapSteps(raw['steps']);
+        return RouteOption(
+          durationSeconds: _asInt(raw['duration']),
+          distanceMeters: _asDouble(raw['distance']),
+          tollYuan: _asInt(raw['tolls']),
+          trafficLights: _asInt(raw['traffic_lights']),
+          strategyTags: [strategyTag],
+          provider: MapProvider.amap,
+          recommended: recommended,
+          points: collected.points,
+          steps: collected.steps,
+        );
+      }(),
   ];
 }
 
@@ -127,20 +140,20 @@ List<RouteOption> parseAmapSimpleRouteJson(
   if (paths is! List) return const [];
   return [
     for (final raw in paths.whereType<Map<String, dynamic>>())
-      RouteOption(
-        durationSeconds: _asInt(raw['duration']),
-        distanceMeters: _asDouble(raw['distance']),
-        tollYuan: 0,
-        trafficLights: 0,
-        strategyTags: const ['推荐路线'],
-        provider: MapProvider.amap,
-        recommended: true,
-        points: [
-          for (final step in (raw['steps'] as List? ?? const [])
-              .whereType<Map<String, dynamic>>())
-            ...parseAmapPolyline(step['polyline']?.toString() ?? ''),
-        ],
-      ),
+      () {
+        final collected = _collectAmapSteps(raw['steps']);
+        return RouteOption(
+          durationSeconds: _asInt(raw['duration']),
+          distanceMeters: _asDouble(raw['distance']),
+          tollYuan: 0,
+          trafficLights: 0,
+          strategyTags: const ['推荐路线'],
+          provider: MapProvider.amap,
+          recommended: true,
+          points: collected.points,
+          steps: collected.steps,
+        );
+      }(),
   ];
 }
 
@@ -153,18 +166,24 @@ List<RouteOption> parseAmapTransitJson(Map<String, dynamic> json) {
   for (final raw in transits.whereType<Map<String, dynamic>>()) {
     final points = <GeoPoint>[];
     final lines = <String>[];
+    final steps = <String>[];
     for (final seg in (raw['segments'] as List? ?? const [])
         .whereType<Map<String, dynamic>>()) {
       final walking = seg['walking'] as Map<String, dynamic>?;
       for (final step in (walking?['steps'] as List? ?? const [])
           .whereType<Map<String, dynamic>>()) {
         points.addAll(parseAmapPolyline(step['polyline']?.toString() ?? ''));
+        final instruction = step['instruction']?.toString() ?? '';
+        if (instruction.isNotEmpty) steps.add(instruction);
       }
       final bus = seg['bus'] as Map<String, dynamic>?;
       for (final line in (bus?['buslines'] as List? ?? const [])
           .whereType<Map<String, dynamic>>()) {
         final name = line['name']?.toString() ?? '';
-        if (name.isNotEmpty) lines.add(name.split('(').first);
+        if (name.isNotEmpty) {
+          lines.add(name.split('(').first);
+          steps.add('乘坐 $name');
+        }
         final polyline =
             (line['polyline'] as Map<String, dynamic>?)?['polyline'];
         points.addAll(parseAmapPolyline(polyline?.toString() ?? ''));
@@ -180,9 +199,19 @@ List<RouteOption> parseAmapTransitJson(Map<String, dynamic> json) {
       provider: MapProvider.amap,
       recommended: options.isEmpty,
       points: points,
+      steps: steps,
     ));
   }
   return options;
+}
+
+/// 解析逆地理编码响应 → 格式化地址（纯函数，供单测）。
+String? parseAmapRegeoJson(Map<String, dynamic> json) {
+  _ensureAmapOk(json);
+  final regeo = json['regeocode'];
+  if (regeo is! Map<String, dynamic>) return null;
+  final address = regeo['formatted_address']?.toString() ?? '';
+  return address.isEmpty ? null : address;
 }
 
 /// 高德 Web 服务真实实现。Key 通过 [keyProvider] 在每次请求时读取，
@@ -235,6 +264,19 @@ class AmapWebService implements MapDataService {
       providerName: _providerName,
     );
     return parseAmapSearchJson(json);
+  }
+
+  @override
+  Future<String?> reverseGeocode(GeoPoint point, MapProvider provider) async {
+    try {
+      final json = await _api.getJson(
+        _uri('/v3/geocode/regeo', {'location': _lngLat(point)}),
+        providerName: _providerName,
+      );
+      return parseAmapRegeoJson(json);
+    } catch (_) {
+      return null; // 逆地理只是补地名，失败不打断定位主流程
+    }
   }
 
   @override
@@ -350,6 +392,7 @@ class AmapWebService implements MapDataService {
           provider: options[i].provider,
           recommended: i == 0,
           points: options[i].points,
+          steps: options[i].steps,
         ),
     ];
   }

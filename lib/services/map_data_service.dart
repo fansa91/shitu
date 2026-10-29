@@ -14,6 +14,10 @@ abstract class MapDataService {
 
   Future<List<Poi>> searchSuggestions(String query, MapProvider provider);
   Future<List<Poi>> nearbyPois(MapProvider provider);
+
+  /// 逆地理编码：坐标 → 格式化地址。取不到（无 Key / 接口失败）返回 null，
+  /// 调用方据此回退展示「我的位置（定位坐标）」，不要抛错打断定位主流程。
+  Future<String?> reverseGeocode(GeoPoint point, MapProvider provider);
   Future<RoutePlan> planRoute({
     required Poi origin,
     required Poi destination,
@@ -94,6 +98,10 @@ class SampleMapDataService implements MapDataService {
   Future<List<Poi>> nearbyPois(MapProvider provider) async => samplePois;
 
   @override
+  Future<String?> reverseGeocode(GeoPoint point, MapProvider provider) async =>
+      null; // 示例模式不做逆地理编码
+
+  @override
   Future<RoutePlan> planRoute({
     required Poi origin,
     required Poi destination,
@@ -130,6 +138,11 @@ class SampleMapDataService implements MapDataService {
           provider: provider,
           recommended: true,
           points: line,
+          steps: [
+            '从「${origin.name}」出发',
+            '沿示例道路前往「${destination.name}」（示例数据）',
+            '到达目的地',
+          ],
         ),
         RouteOption(
           durationSeconds: (baseSeconds * 1.18).round(),

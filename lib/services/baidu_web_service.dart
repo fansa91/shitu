@@ -59,6 +59,10 @@ GeoPoint? _parseBaiduLocation(Object? raw) {
   return bd09ToGcj02(GeoPoint(latitude: lat, longitude: lng));
 }
 
+/// 百度分步文案带 HTML 标签（如 <b>），展示前去掉。
+String stripHtmlTags(String text) =>
+    text.replaceAll(RegExp(r'<[^>]*>'), '').trim();
+
 /// 解析百度算路响应。steps[].path 为 BD-09 的 "lng,lat;..." 串，
 /// 逐点转 GCJ-02；公交 steps 无 path 时用起讫站坐标兜底连线。
 List<RouteOption> parseBaiduRouteJson(
@@ -71,6 +75,7 @@ List<RouteOption> parseBaiduRouteJson(
   final options = <RouteOption>[];
   for (final raw in routes.whereType<Map<String, dynamic>>()) {
     final points = <GeoPoint>[];
+    final steps = <String>[];
     for (final step in (raw['steps'] as List? ?? const [])
         .whereType<Map<String, dynamic>>()) {
       final path = step['path']?.toString() ?? step['traffics']?.toString() ?? '';
@@ -83,6 +88,9 @@ List<RouteOption> parseBaiduRouteJson(
           points.add(bd09ToGcj02(GeoPoint(latitude: lat, longitude: lng)));
         }
       }
+      final instruction =
+          stripHtmlTags(step['instructions']?.toString() ?? '');
+      if (instruction.isNotEmpty) steps.add(instruction);
     }
     options.add(RouteOption(
       durationSeconds: (raw['duration'] as num?)?.toInt() ?? 0,
@@ -93,9 +101,17 @@ List<RouteOption> parseBaiduRouteJson(
       provider: MapProvider.baidu,
       recommended: options.isEmpty,
       points: points,
+      steps: steps,
     ));
   }
   return options;
+}
+
+/// 解析百度逆地理编码响应 → 格式化地址（纯函数，供单测）。
+String? parseBaiduRegeoJson(Map<String, dynamic> json) {
+  final result = _ensureBaiduOk(json);
+  final address = result['formatted_address']?.toString() ?? '';
+  return address.isEmpty ? null : address;
 }
 
 /// 百度 Web 服务真实实现。坐标进出统一转换：
@@ -154,6 +170,22 @@ class BaiduWebService implements MapDataService {
       providerName: _providerName,
     );
     return parseBaiduSearchJson(json);
+  }
+
+  @override
+  Future<String?> reverseGeocode(GeoPoint point, MapProvider provider) async {
+    try {
+      final json = await _api.getJson(
+        _uri('/reverse_geocoding/v3/', {
+          'location': _bdLatLng(point),
+          'coordtype': 'bd09ll',
+        }),
+        providerName: _providerName,
+      );
+      return parseBaiduRegeoJson(json);
+    } catch (_) {
+      return null; // 逆地理只是补地名，失败不打断定位主流程
+    }
   }
 
   @override

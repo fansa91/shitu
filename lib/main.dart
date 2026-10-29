@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import 'screens/home_screen.dart';
 import 'services/map_data_services.dart';
+import 'services/places_service.dart';
 import 'services/settings_service.dart';
 
 /// 识途品牌主色（地图蓝），无动态取色时回落使用。
@@ -12,13 +13,16 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final settings = SettingsService();
   await settings.load();
-  runApp(ShituApp(settings: settings));
+  final places = PlacesService();
+  await places.load();
+  runApp(ShituApp(settings: settings, places: places));
 }
 
 class ShituApp extends StatelessWidget {
-  const ShituApp({super.key, required this.settings});
+  const ShituApp({super.key, required this.settings, required this.places});
 
   final SettingsService settings;
+  final PlacesService places;
 
   @override
   Widget build(BuildContext context) {
@@ -39,6 +43,7 @@ class ShituApp extends StatelessWidget {
           home: HomeScreen(
             settings: settings,
             services: MapDataServices(settings),
+            places: places,
           ),
         );
       },
