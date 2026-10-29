@@ -1,0 +1,9 @@
+# [vendored patch] 本包为官方 3.0.0 源码 vendoring（2022 年风格基线），
+# 不套用主工程的 flutter_lints（最近一级的本文件对本包目录生效），
+# 分析器自身的两类存量 hint 在包内忽略，保持 vendored 源码最小改动。
+# 详见 VENDORED.md。
+analyzer:
+  errors:
+    deprecated_member_use: ignore
+    unnecessary_null_in_if_null_operators: ignore
+    unnecessary_import: ignore

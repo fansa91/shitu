@@ -1,0 +1,44 @@
+// [vendored patch] 官方 3.0.0 的 build.gradle 是 2020 年配置（AGP 3.5.0 /
+// compileSdk 29 / jcenter / compileOnly 3dmap 8.1.0），无法在当前 Flutter
+// 构建链下工作。这里镜像同源 fork amap_map 1.0.15 已在本工程 CI 验证过的
+// 配置：namespace、compileSdk 35、mavenCentral 上的组合 SDK
+// 3dmap-location-search 10.1.200（implementation，保证运行时带 SDK）。
+group 'com.amap.flutter.map'
+version '1.0'
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath 'com.android.tools.build:gradle:3.5.4'
+    }
+}
+
+rootProject.allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+apply plugin: 'com.android.library'
+
+android {
+    namespace = "com.amap.flutter.map"
+    compileSdkVersion 35
+
+    defaultConfig {
+        minSdkVersion 21
+    }
+    lintOptions {
+        disable 'InvalidPackage'
+    }
+}
+
+dependencies {
+    implementation 'com.amap.api:3dmap-location-search:10.1.200_loc6.4.9_sea9.7.4'
+    implementation 'androidx.annotation:annotation:1.9.1'
+}

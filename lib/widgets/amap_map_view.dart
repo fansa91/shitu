@@ -1,6 +1,6 @@
-import 'package:amap_map/amap_map.dart';
+import 'package:amap_flutter_base/amap_flutter_base.dart';
+import 'package:amap_flutter_map/amap_flutter_map.dart';
 import 'package:flutter/material.dart';
-import 'package:x_amap_base/x_amap_base.dart';
 
 import '../models/geo_point.dart';
 import '../models/poi.dart';
@@ -11,10 +11,14 @@ import '../services/settings_service.dart';
 import 'app_map.dart';
 import 'fake_map.dart';
 
-/// 真实高德地图（社区维护 fork `amap_map`，基于官方插件演进）。
+/// 真实高德地图（官方插件 `amap_flutter_map` 3.0.0 的 vendoring 版，
+/// 源码在 `packages/amap_flutter_map`，含「TextureMapView -> MapView」
+/// 等补丁，清单见该包 VENDORED.md）。
 /// 只在隐私已同意、SDK 已就绪、当前平台 Key 已填时由 AppMap 选用。
 ///
-/// Key 与隐私声明在首次构建前经 AMapInitializer 注入：Key 运行时从
+/// Key 与隐私声明经 AMapWidget 的 apiKey / privacyStatement 创建参数
+/// 注入：原生工厂在构造 MapView 之前调用 MapsInitializer.setApiKey 与
+/// 隐私三件套（updatePrivacyShow / updatePrivacyAgree）。Key 运行时从
 /// SettingsService 读取，绝不硬编码；本 Widget 只会在用户已同意隐私
 /// 后才被构建（见 HomeScreen 的隐私流程与 AmapSdkService 的门控）。
 ///
@@ -99,7 +103,7 @@ class _AmapMapViewState extends State<AmapMapView> {
     widget.crashGuard?.markStep(MapBreadcrumbStep.sdkInitStart);
     _initFuture = AmapSdkService.instance.runPluginInit(
       widget.settings,
-      () async => _doPluginInit(),
+      () async => _preparePluginInit(),
     );
     _initFuture.then((ok) {
       if (ok) {
@@ -112,23 +116,16 @@ class _AmapMapViewState extends State<AmapMapView> {
     });
   }
 
-  /// 把运行时 Key 与隐私同意状态注入插件（由门控保证同一 Key 只跑一次）。
-  void _doPluginInit() {
-    AMapInitializer.updatePrivacyAgree(
-      const AMapPrivacyStatement(
-        hasContains: true,
-        hasShow: true,
-        hasAgree: true, // 能走到这里说明用户已在首启对话框同意
-      ),
-    );
-    AMapInitializer.init(
-      context,
-      apiKey: AMapApiKey(
-        androidKey: widget.settings.amapSdkAndroidKey.trim(),
-        iosKey: widget.settings.amapSdkIosKey.trim(),
-      ),
-    );
-  }
+  /// 插件注入前准备（由门控保证同一 Key 只跑一次）。
+  ///
+  /// 官方插件没有 AMapInitializer：Key 与隐私声明在 _buildRealMap 里经
+  /// AMapWidget 的创建参数下发，原生工厂在构造 MapView 之前完成
+  /// MapsInitializer.setApiKey 与隐私三件套调用。因此 Dart 侧建图前
+  /// 无事可做（Key 非空已由 AmapSdkService.canShowRealMap 保证），保留
+  /// 这一步只为维持门控/面包屑的步骤语义：sdk_init_done 表示「注入
+  /// 参数已备齐、允许建图」；真正的原生注入发生在 map_create_start
+  /// 与 on_map_created 之间的窗口内（工厂 create 全程同步执行）。
+  void _preparePluginInit() {}
 
   @override
   void didUpdateWidget(covariant AmapMapView oldWidget) {
@@ -322,13 +319,26 @@ class _AmapMapViewState extends State<AmapMapView> {
     final initialTarget = focus != null
         ? _toLatLng(focus)
         : const LatLng(22.54554, 114.05769); // 深圳市中心
-    // 面包屑：即将把创建参数交给原生 TextureMapView——原生崩溃最可能
-    // 发生在这一步到 onMapCreated 之间，序列停在这里即指向该窗口。
+    // 面包屑：即将把创建参数交给原生侧（工厂先注入 Key/隐私、再构造
+    // MapView）——原生崩溃最可能发生在这一步到 onMapCreated 之间，
+    // 序列停在这里即指向该窗口。
     if (!_createMarked) {
       _createMarked = true;
       widget.crashGuard?.markStep(MapBreadcrumbStep.mapCreateStart);
     }
     return AMapWidget(
+      // 运行时 Key / 隐私注入：原生工厂据此在构造 MapView 前调用
+      // MapsInitializer.setApiKey 与 updatePrivacyShow / updatePrivacyAgree；
+      // Key 只从设置现读现传，绝不硬编码。
+      apiKey: AMapApiKey(
+        androidKey: widget.settings.amapSdkAndroidKey.trim(),
+        iosKey: widget.settings.amapSdkIosKey.trim(),
+      ),
+      privacyStatement: const AMapPrivacyStatement(
+        hasContains: true,
+        hasShow: true,
+        hasAgree: true, // 能走到这里说明用户已在首启对话框同意
+      ),
       // 创建段最简初始相机：只有目标 + 缩放，倾斜/方位归 0；
       // 就绪段插件不再重读此参数，倾斜在 onMapCreated 里用相机命令补。
       initialCameraPosition: CameraPosition(
@@ -343,7 +353,7 @@ class _AmapMapViewState extends State<AmapMapView> {
       // 兼容模式：关掉一切可选渲染项（建筑/路况/指南针/比例尺/标注/
       // POI 点击），只留最基础的底图；手势保持插件默认不动，
       // 创建段与就绪段一致（插件默认全开，本工程从不覆写）。
-      // 注：插件 1.0.15 未公开室内图/缩放控件开关，无从设置。
+      // 注：官方插件 3.0.0 未公开室内图/缩放控件开关，无从设置。
       trafficEnabled: stage.trafficEnabled,
       buildingsEnabled: stage.buildingsEnabled,
       compassEnabled: false,

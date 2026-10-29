@@ -2,7 +2,7 @@ import 'geo_point.dart';
 import 'map_provider.dart';
 
 /// 本地保存的「离线路线」：只含路线数据（折线 + 分步文案 + 起终点摘要），
-/// 不含地图底图。注意：amap_map 插件不提供离线地图下载能力，所以本应用
+/// 不含地图底图。注意：高德地图插件不提供离线地图下载能力，所以本应用
 /// 的「离线」只到路线数据为止，查看时底图仍需联网加载（UI 会如实标注）。
 class OfflineRoute {
   const OfflineRoute({

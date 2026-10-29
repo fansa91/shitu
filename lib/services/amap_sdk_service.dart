@@ -4,12 +4,13 @@ import 'amap_init_gate.dart';
 import 'settings_service.dart';
 
 /// 高德原生地图 SDK 的接入状态管理（插件选型见 AmapMapView 注释：
-/// 官方 amap_flutter_map 3.0.0 在 Flutter 3.47 下 CFE 编译失败，
-/// 改用社区维护 fork amap_map 1.0.15）。
+/// 官方 amap_flutter_map 3.0.0 vendoring 进仓并打补丁，见
+/// packages/amap_flutter_map/VENDORED.md）。
 ///
 /// 初始化纪律（v0.2 真机冷启动闪退后加固）：
-/// - 插件初始化（AMapInitializer.*）只能经 [runPluginInit] 走 [gate] 单飞：
-///   同一 Key 只初始化一次、失败可重试、Key 变化重新初始化；
+/// - 插件注入前准备只能经 [runPluginInit] 走 [gate] 单飞：
+///   同一 Key 只准备一次、失败可重试、Key 变化重新准备；
+///   Key/隐私本体经 AMapWidget 创建参数在原生建图前注入（见 AmapMapView）；
 /// - AmapMapView 必须等 [runPluginInit] 成功后才创建 AMapWidget，
 ///   失败时回落 FakeMap 并把原因留在 [lastInitError] 供横幅/诊断展示；
 /// - [canShowRealMap] 只表达「意图」（移动端+已同意隐私+已填 Key），
@@ -75,8 +76,9 @@ class AmapSdkService extends ChangeNotifier {
     return ok;
   }
 
-  /// 经门控执行真正的插件初始化（[doInit] 里做 AMapInitializer 调用）。
-  /// 同一 Key 单飞、失败记录原因并可重试、Key 变了重新初始化。
+  /// 经门控执行插件注入前准备（[doInit] 备齐/校验注入参数；真正的
+  /// Key/隐私注入由 AMapWidget 创建参数在原生工厂建图前完成）。
+  /// 同一 Key 单飞、失败记录原因并可重试、Key 变了重新准备。
   Future<bool> runPluginInit(
     SettingsService settings,
     Future<void> Function() doInit,
