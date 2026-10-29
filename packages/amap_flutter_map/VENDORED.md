@@ -50,6 +50,16 @@ vendoring 进本仓库 `packages/` 以 path 依赖引用。`example/` 与上游�
    包内忽略 `deprecated_member_use`（Color.value 序列化与原生协议对齐，
    不动）、`unnecessary_null_in_if_null_operators`、`unnecessary_import`
    三类存量 hint，使主工程 `flutter analyze` 保持零问题。
+9. **现行 Flutter 已移除 API 的 Java 适配**（v0.2.4 首轮 CI 编译实锤后补，
+   写法镜像同源 fork amap_map 1.0.15 已验证版本）：
+   - `AMapFlutterMapPlugin.java`：删 v1 嵌入
+     `registerWith(PluginRegistry.Registrar)`（Registrar 已被移除；
+     v2 `onAttachedToEngine` 已完整注册同一视图工厂，行为不变），
+     连带删仅其使用的 `Activity`/`LifecycleOwner`/`PluginRegistry` 导入。
+   - `utils/ConvertUtil.java`：`io.flutter.view.FlutterMain`（已移除）的
+     静态 `getLookupKeyForAsset` 改用 `io.flutter.embedding.engine.loader.
+     FlutterLoader` 实例；新增幂等 `ConvertUtil.initialize(Context)`，
+     由 `AMapPlatformViewFactory.create()` 在建图前调用。
 
 ## 未改动的原有机制（与换插件决策相关）
 

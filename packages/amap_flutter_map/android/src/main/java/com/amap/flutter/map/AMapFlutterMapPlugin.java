@@ -1,11 +1,8 @@
 package com.amap.flutter.map;
 
-import android.app.Activity;
-
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.lifecycle.Lifecycle;
-import androidx.lifecycle.LifecycleOwner;
 
 import com.amap.flutter.map.utils.LogUtil;
 
@@ -14,7 +11,6 @@ import io.flutter.embedding.engine.plugins.FlutterPlugin;
 import io.flutter.embedding.engine.plugins.activity.ActivityAware;
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding;
 import io.flutter.embedding.engine.plugins.lifecycle.FlutterLifecycleAdapter;
-import io.flutter.plugin.common.PluginRegistry;
 
 /**
  * AmapFlutterMapPlugin
@@ -28,35 +24,9 @@ public class AMapFlutterMapPlugin implements
 
     private static final String VIEW_TYPE = "com.amap.flutter.map";
 
-    public static void registerWith(PluginRegistry.Registrar registrar) {
-        LogUtil.i(CLASS_NAME, "registerWith=====>");
-
-        final Activity activity = registrar.activity();
-        if (activity == null) {
-            LogUtil.w(CLASS_NAME, "activity is null!!!");
-            return;
-        }
-        if (activity instanceof LifecycleOwner) {
-            registrar
-                    .platformViewRegistry()
-                    .registerViewFactory(
-                            VIEW_TYPE,
-                            new AMapPlatformViewFactory(
-                                    registrar.messenger(),
-                                    new LifecycleProvider() {
-                                        @Override
-                                        public Lifecycle getLifecycle() {
-                                            return ((LifecycleOwner) activity).getLifecycle();
-                                        }
-                                    }));
-        } else {
-            registrar
-                    .platformViewRegistry()
-                    .registerViewFactory(
-                            VIEW_TYPE,
-                            new AMapPlatformViewFactory(registrar.messenger(), new ProxyLifecycleProvider(activity)));
-        }
-    }
+    // [vendored patch] 删除 v1 嵌入的 registerWith(PluginRegistry.Registrar)：
+    // Registrar 已被现行 Flutter 移除（CI 编译报 cannot find symbol），
+    // v2 的 onAttachedToEngine 已完整注册同一视图工厂，删除不改变行为。
 
     public AMapFlutterMapPlugin() {
     }

@@ -30,7 +30,10 @@ import java.util.Map;
 
 import androidx.annotation.NonNull;
 
-import io.flutter.view.FlutterMain;
+// [vendored patch] io.flutter.view.FlutterMain 已被现行 Flutter 移除，
+// 改用 io.flutter.embedding.engine.loader.FlutterLoader（与同源 fork
+// amap_map 1.0.15 已在 CI 验证的写法一致）。
+import io.flutter.embedding.engine.loader.FlutterLoader;
 
 /**
  * @author whm
@@ -44,6 +47,19 @@ public class ConvertUtil {
 
     public static float density;
     private static String apiKey;
+    // [vendored patch] 资源路径查询改走 FlutterLoader 实例（原 FlutterMain 静态方法）。
+    private static FlutterLoader flutterLoader;
+
+    // [vendored patch] 由 AMapPlatformViewFactory.create() 在建图前调用（幂等）。
+    public static void initialize(Context context) {
+        if (flutterLoader == null) {
+            flutterLoader = new FlutterLoader();
+        }
+        if (!flutterLoader.initialized()) {
+            flutterLoader.startInitialization(context);
+            flutterLoader.ensureInitializationComplete(context, null);
+        }
+    }
 
     public static void setPrivacyStatement(Context context, Object object) {
         if (null == object) {
@@ -373,15 +389,15 @@ public class ConvertUtil {
             case "fromAsset":
                 if (data.size() == 2) {
                     return BitmapDescriptorFactory.fromAsset(
-                            FlutterMain.getLookupKeyForAsset(toString(data.get(1))));
+                            flutterLoader.getLookupKeyForAsset(toString(data.get(1))));
                 } else {
                     return BitmapDescriptorFactory.fromAsset(
-                            FlutterMain.getLookupKeyForAsset(toString(data.get(1)), toString(data.get(2))));
+                            flutterLoader.getLookupKeyForAsset(toString(data.get(1)), toString(data.get(2))));
                 }
             case "fromAssetImage":
                 if (data.size() == 3) {
                     return BitmapDescriptorFactory.fromAsset(
-                            FlutterMain.getLookupKeyForAsset(toString(data.get(1))));
+                            flutterLoader.getLookupKeyForAsset(toString(data.get(1))));
                 } else {
                     throw new IllegalArgumentException(
                             "'fromAssetImage' Expected exactly 3 arguments, got: " + data.size());

@@ -36,6 +36,8 @@ class AMapPlatformViewFactory extends PlatformViewFactory {
         Map<String, Object> params = null;
         try {
             ConvertUtil.density = context.getResources().getDisplayMetrics().density;
+            // [vendored patch] 建图前初始化 ConvertUtil 的 FlutterLoader（资源标记用）。
+            ConvertUtil.initialize(context);
             params = (Map<String, Object>) args;
             LogUtil.i(CLASS_NAME,"create params==>" + params);
             if (params.containsKey("privacyStatement")) {
