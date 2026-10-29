@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../models/map_provider.dart';
 import '../models/poi.dart';
+import '../services/amap_sdk_service.dart';
 import '../services/map_data_service.dart';
+import '../services/map_data_services.dart';
 import '../services/settings_service.dart';
 import '../utils/format.dart';
-import '../widgets/fake_map.dart';
+import '../widgets/app_map.dart';
 import '../widgets/poi_detail_panel.dart';
 import 'route_screen.dart';
 import 'search_screen.dart';
@@ -13,15 +15,16 @@ import 'settings_screen.dart';
 
 /// 主页：全屏地图 + 悬浮搜索栏 + 数据源芯片 + 右侧控件 + 底部面板。
 /// 宽度 >=900 时切换为左栏面板 + 右地图双栏。
+/// 底图满足条件时为真实高德地图，否则回退假地图（见 AppMap）。
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
     super.key,
     required this.settings,
-    required this.mapData,
+    required this.services,
   });
 
   final SettingsService settings;
-  final MapDataService mapData;
+  final MapDataServices services;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -31,8 +34,59 @@ class _HomeScreenState extends State<HomeScreen> {
   final _sheetController = DraggableScrollableController();
   Poi? _selectedPoi;
   bool _trafficOn = true;
+  bool _privacyPromptShown = false;
 
   SettingsService get _settings => widget.settings;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _initAmapWithPrivacy());
+  }
+
+  /// 隐私合规顺序：先征得用户同意，才允许初始化高德 SDK；
+  /// 不同意（或非移动端）则不初始化，地图全程回退假地图。
+  Future<void> _initAmapWithPrivacy() async {
+    if (!mounted) return;
+    if (_settings.privacyAgreed) {
+      await AmapSdkService.instance.initialize(_settings);
+      if (mounted) setState(() {});
+      return;
+    }
+    if (!AmapSdkService.instance.isMobilePlatform || _privacyPromptShown) {
+      return;
+    }
+    _privacyPromptShown = true;
+    final agreed = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            title: const Text('隐私与高德地图 SDK'),
+            content: const Text(
+              '识途使用高德地图 SDK 提供地图显示与定位服务，SDK 会按其隐私政策'
+              '收集设备与位置信息。只有你同意后，我们才会初始化地图 SDK 并'
+              '加载你在设置中填写的 SDK Key；不同意则使用示意地图，'
+              '搜索与算路（Web API）不受影响。',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('不同意'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('同意并继续'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!agreed || !mounted) return;
+    await _settings.setPrivacyAgreed(true);
+    await AmapSdkService.instance.initialize(_settings);
+    if (mounted) setState(() {});
+  }
 
   @override
   void dispose() {
@@ -45,7 +99,7 @@ class _HomeScreenState extends State<HomeScreen> {
       MaterialPageRoute(
         builder: (_) => SearchScreen(
           settings: _settings,
-          mapData: widget.mapData,
+          services: widget.services,
         ),
       ),
     );
@@ -73,7 +127,7 @@ class _HomeScreenState extends State<HomeScreen> {
         builder: (_) => RouteScreen(
           destination: poi,
           settings: _settings,
-          mapData: widget.mapData,
+          services: widget.services,
         ),
       ),
     );
@@ -113,7 +167,11 @@ class _HomeScreenState extends State<HomeScreen> {
     return Stack(
       children: [
         Positioned.fill(
-          child: FakeMap(showDestinationPin: _selectedPoi != null),
+          child: AppMap(
+            settings: _settings,
+            selectedPoi: _selectedPoi,
+            trafficEnabled: _trafficOn,
+          ),
         ),
         SafeArea(
           child: Padding(
@@ -215,7 +273,11 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Stack(
             children: [
               Positioned.fill(
-                child: FakeMap(showDestinationPin: _selectedPoi != null),
+                child: AppMap(
+                  settings: _settings,
+                  selectedPoi: _selectedPoi,
+                  trafficEnabled: _trafficOn,
+                ),
               ),
               Positioned(right: 14, top: 90, child: _mapControls(context)),
             ],
@@ -266,10 +328,24 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _providerChip(BuildContext context) {
-    return InputChip(
-      avatar: const Icon(Icons.dataset_outlined, size: 16),
-      label: Text('${_settings.provider.displayName} ▾'),
-      onPressed: () => _cycleProvider(context),
+    final sample = widget.services.isSampleFor(_settings.provider);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        InputChip(
+          avatar: const Icon(Icons.dataset_outlined, size: 16),
+          label: Text('${_settings.provider.displayName} ▾'),
+          onPressed: () => _cycleProvider(context),
+        ),
+        if (sample) ...[
+          const SizedBox(width: 8),
+          const Chip(
+            avatar: Icon(Icons.science_outlined, size: 16),
+            label: Text('示例数据'),
+            visualDensity: VisualDensity.compact,
+          ),
+        ],
+      ],
     );
   }
 
@@ -400,8 +476,9 @@ class _HomeScreenState extends State<HomeScreen> {
             contentPadding: EdgeInsets.zero,
             leading: const Icon(Icons.history),
             title: Text(poi.name),
-            subtitle:
-                Text('${poi.address} · ${formatDistance(poi.distanceMeters)}'),
+            subtitle: Text(poi.distanceMeters == null
+                ? poi.address
+                : '${poi.address} · ${formatDistance(poi.distanceMeters!)}'),
             onTap: () => setState(() => _selectedPoi = poi),
           ),
       ],

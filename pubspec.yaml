@@ -37,7 +37,8 @@ dependencies:
   shared_preferences: ^2.3.2
   http: ^1.2.2
   dynamic_color: ^1.7.0
-
+  amap_map: ^1.0.15
+  x_amap_base: ^1.0.3
 dev_dependencies:
   flutter_test:
     sdk: flutter

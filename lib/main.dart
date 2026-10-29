@@ -2,7 +2,7 @@ import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 
 import 'screens/home_screen.dart';
-import 'services/map_data_service.dart';
+import 'services/map_data_services.dart';
 import 'services/settings_service.dart';
 
 /// 识途品牌主色（地图蓝），无动态取色时回落使用。
@@ -38,7 +38,7 @@ class ShituApp extends StatelessWidget {
           darkTheme: ThemeData(colorScheme: darkScheme, useMaterial3: true),
           home: HomeScreen(
             settings: settings,
-            mapData: const SampleMapDataService(),
+            services: MapDataServices(settings),
           ),
         );
       },

@@ -1,0 +1,15 @@
+{
+  "status": 0,
+  "message": "Success",
+  "count": 1,
+  "data": [
+    {
+      "id": "fixture-id-1",
+      "title": "深圳万象城",
+      "address": "广东省深圳市罗湖区宝安南路1881号",
+      "category": "购物:商场",
+      "tel": "0755-82328888",
+      "location": {"lat": 22.545541, "lng": 114.118452}
+    }
+  ]
+}

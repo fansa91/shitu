@@ -66,5 +66,9 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>识途需要使用你的位置来在地图上显示定位、搜索周边地点并进行路线导航。</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>识途在导航过程中需要持续获取位置以提供实时引导；仅在你使用导航功能时使用。</string>
 </dict>
 </plist>

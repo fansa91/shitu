@@ -1,0 +1,15 @@
+{
+  "status": 0,
+  "message": "ok",
+  "results": [
+    {
+      "name": "深圳市民中心",
+      "location": {"lng": 114.064551, "lat": 22.548456},
+      "address": "广东省深圳市福田区福中三路",
+      "province": "广东省",
+      "city": "深圳市",
+      "area": "福田区",
+      "uid": "fixture-uid-1"
+    }
+  ]
+}

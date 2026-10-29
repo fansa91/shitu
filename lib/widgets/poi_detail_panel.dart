@@ -43,7 +43,9 @@ class PoiDetailPanel extends StatelessWidget {
           ],
         ),
         Text(
-          '${poi.address} · 距你 ${formatDistance(poi.distanceMeters)}',
+          poi.distanceMeters == null
+              ? poi.address
+              : '${poi.address} · 距你 ${formatDistance(poi.distanceMeters!)}',
           style: theme.textTheme.bodyMedium
               ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
         ),

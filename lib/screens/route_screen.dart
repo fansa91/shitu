@@ -1,39 +1,51 @@
 import 'package:flutter/material.dart';
 
+import '../models/geo_point.dart';
 import '../models/map_provider.dart';
 import '../models/poi.dart';
 import '../models/route_plan.dart';
-import '../services/map_data_service.dart';
+import '../services/api_exception.dart';
+import '../services/map_data_services.dart';
 import '../services/settings_service.dart';
 import '../utils/format.dart';
-import '../widgets/fake_map.dart';
+import '../widgets/app_map.dart';
 import 'navigation_screen.dart';
 
-/// 路线规划页：起终点卡 + 出行方式切换 + 双路线同显 + 多方案卡。
+/// 路线规划页：起终点（Poi 驱动）+ 出行方式切换 + 双路线同显 + 多方案卡。
+///
+/// 起点文本被修改后，先走当前服务商搜索取首个结果的坐标再算路；
 /// 宽度 >=900 时左栏放操作区、右栏放地图。
 class RouteScreen extends StatefulWidget {
   const RouteScreen({
     super.key,
     required this.destination,
     required this.settings,
-    required this.mapData,
+    required this.services,
   });
 
   final Poi destination;
   final SettingsService settings;
-  final MapDataService mapData;
+  final MapDataServices services;
 
   @override
   State<RouteScreen> createState() => _RouteScreenState();
 }
 
 class _RouteScreenState extends State<RouteScreen> {
-  static const _myLocation = '我的位置';
-  late String _originName = _myLocation;
-  late String _destinationName = widget.destination.name;
+  static const _myLocationPoi = Poi(
+    id: 'origin-my-location',
+    name: '我的位置',
+    address: '',
+    category: '起点',
+  );
+
+  final _originController = TextEditingController(text: '我的位置');
+  late Poi _originPoi = _myLocationPoi;
+  late Poi _destPoi = widget.destination;
   TransportMode _mode = TransportMode.driving;
   late MapProvider _routeProvider = widget.settings.provider;
   late Future<RoutePlan> _planFuture;
+  RoutePlan? _plan;
   RouteOption? _selected;
 
   @override
@@ -42,27 +54,61 @@ class _RouteScreenState extends State<RouteScreen> {
     _reload();
   }
 
+  @override
+  void dispose() {
+    _originController.dispose();
+    super.dispose();
+  }
+
+  /// 起点文本与已解析的起点不一致时，先搜索解析坐标（取首个结果）。
+  Future<Poi> _resolveOrigin() async {
+    final text = _originController.text.trim();
+    if (text.isEmpty || text == _originPoi.name) return _originPoi;
+    final results = await widget.services
+        .serviceFor(_routeProvider)
+        .searchSuggestions(text, _routeProvider);
+    if (results.isEmpty) {
+      throw MapApiException(
+        MapApiErrorKind.precondition,
+        '未找到起点「$text」，请换个名称重试',
+      );
+    }
+    _originPoi = results.first;
+    return _originPoi;
+  }
+
   void _reload() {
-    _planFuture = widget.mapData.planRoute(
-      originName: _originName,
-      destination: widget.destination,
-      mode: _mode,
-      provider: _routeProvider,
-    );
+    _planFuture = _loadPlan();
     _planFuture.then((plan) {
       if (mounted) {
-        setState(() => _selected =
-            plan.options.where((o) => o.recommended).firstOrNull ??
-                plan.options.firstOrNull);
+        setState(() {
+          _plan = plan;
+          _selected =
+              plan.options.where((o) => o.recommended).firstOrNull ??
+                  plan.options.firstOrNull;
+        });
       }
+    }).onError((_, _) {
+      // 错误由 FutureBuilder 的错误区呈现，这里只吞掉未处理异常。
     });
+  }
+
+  Future<RoutePlan> _loadPlan() async {
+    final origin = await _resolveOrigin();
+    return widget.services.serviceFor(_routeProvider).planRoute(
+          origin: origin,
+          destination: _destPoi,
+          mode: _mode,
+          provider: _routeProvider,
+        );
   }
 
   void _swap() {
     setState(() {
-      final tmp = _originName;
-      _originName = _destinationName;
-      _destinationName = tmp;
+      final tmpPoi = _originPoi;
+      _originPoi = _destPoi;
+      _destPoi = tmpPoi;
+      _originController.text = _originPoi.name;
     });
     _reload();
   }
@@ -74,12 +120,22 @@ class _RouteScreenState extends State<RouteScreen> {
       MaterialPageRoute(
         builder: (_) => NavigationScreen(
           option: option,
-          destinationName: _destinationName,
+          destinationName: _destPoi.name,
           settings: widget.settings,
           simulated: simulated,
         ),
       ),
     );
+  }
+
+  List<GeoPoint> get _selectedPoints => _selected?.points ?? const [];
+  List<GeoPoint> get _alternativePoints {
+    final plan = _plan;
+    if (plan == null) return const [];
+    for (final o in plan.options) {
+      if (o != _selected && o.points.isNotEmpty) return o.points;
+    }
+    return const [];
   }
 
   @override
@@ -95,13 +151,13 @@ class _RouteScreenState extends State<RouteScreen> {
                   width: 380,
                   child: _controlPanel(context, scrollable: true),
                 ),
-                const Expanded(child: FakeMap(showRoute: true)),
+                Expanded(child: _mapArea()),
               ],
             );
           }
           return Stack(
             children: [
-              const Positioned.fill(child: FakeMap(showRoute: true)),
+              Positioned.fill(child: _mapArea()),
               Positioned(
                 left: 12,
                 right: 12,
@@ -118,6 +174,14 @@ class _RouteScreenState extends State<RouteScreen> {
           );
         },
       ),
+    );
+  }
+
+  Widget _mapArea() {
+    return AppMap(
+      settings: widget.settings,
+      selectedRoutePoints: _selectedPoints,
+      alternativeRoutePoints: _alternativePoints,
     );
   }
 
@@ -175,10 +239,16 @@ class _RouteScreenState extends State<RouteScreen> {
                 const Icon(Icons.circle, size: 10, color: Color(0xFF34A853)),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text(
-                    _originName,
+                  child: TextField(
+                    controller: _originController,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      border: InputBorder.none,
+                      hintText: '输入起点（回车搜索解析）',
+                    ),
                     style: theme.textTheme.bodyLarge,
-                    overflow: TextOverflow.ellipsis,
+                    textInputAction: TextInputAction.search,
+                    onSubmitted: (_) => setState(_reload),
                   ),
                 ),
                 IconButton(
@@ -194,12 +264,16 @@ class _RouteScreenState extends State<RouteScreen> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    _destinationName,
+                    _destPoi.name,
                     style: theme.textTheme.bodyLarge,
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                const SizedBox(width: 48),
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  tooltip: '重新规划',
+                  onPressed: () => setState(_reload),
+                ),
               ],
             ),
             const SizedBox(height: 8),
@@ -222,6 +296,7 @@ class _RouteScreenState extends State<RouteScreen> {
   }
 
   Widget _schemeArea(BuildContext context) {
+    final sample = widget.services.isSampleFor(_routeProvider);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -243,12 +318,40 @@ class _RouteScreenState extends State<RouteScreen> {
                 ),
               );
             }),
+            if (sample)
+              const Chip(
+                avatar: Icon(Icons.science_outlined, size: 16),
+                label: Text('示例数据'),
+                visualDensity: VisualDensity.compact,
+              ),
           ],
         ),
         const SizedBox(height: 8),
         FutureBuilder<RoutePlan>(
           future: _planFuture,
           builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              final error = snapshot.error;
+              final message = error is MapApiException
+                  ? error.message
+                  : '算路失败，请稍后重试';
+              return Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.errorContainer,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(child: Text(message)),
+                    TextButton(
+                      onPressed: () => setState(_reload),
+                      child: const Text('重试'),
+                    ),
+                  ],
+                ),
+              );
+            }
             if (!snapshot.hasData) {
               return const Padding(
                 padding: EdgeInsets.all(16),

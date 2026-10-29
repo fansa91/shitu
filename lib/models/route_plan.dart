@@ -1,3 +1,4 @@
+import 'geo_point.dart';
 import 'map_provider.dart';
 
 /// 一条候选路线方案。
@@ -10,7 +11,11 @@ class RouteOption {
     required this.strategyTags,
     required this.provider,
     this.recommended = false,
+    this.points = const [],
   });
+
+  /// 路线折线点（GCJ-02），地图上绘制用；示例数据可为空。
+  final List<GeoPoint> points;
 
   /// 预计时长（秒）。
   final int durationSeconds;

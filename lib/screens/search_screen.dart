@@ -1,20 +1,21 @@
 import 'package:flutter/material.dart';
 
 import '../models/poi.dart';
-import '../services/map_data_service.dart';
+import '../services/api_exception.dart';
+import '../services/map_data_services.dart';
 import '../services/settings_service.dart';
 import '../utils/format.dart';
 
-/// 搜索页：输入联想（骨架阶段为示例数据），点结果返回给主页。
+/// 搜索页：输入联想（真实 Web API 或示例数据），点结果返回给主页。
 class SearchScreen extends StatefulWidget {
   const SearchScreen({
     super.key,
     required this.settings,
-    required this.mapData,
+    required this.services,
   });
 
   final SettingsService settings;
-  final MapDataService mapData;
+  final MapDataServices services;
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
@@ -22,7 +23,18 @@ class SearchScreen extends StatefulWidget {
 
 class _SearchScreenState extends State<SearchScreen> {
   final _controller = TextEditingController();
-  List<Poi> _results = SampleMapDataService.samplePois;
+  List<Poi> _results = const [];
+  String? _error;
+  bool _loading = false;
+
+  bool get _isSample =>
+      widget.services.isSampleFor(widget.settings.provider);
+
+  @override
+  void initState() {
+    super.initState();
+    _onQueryChanged('');
+  }
 
   @override
   void dispose() {
@@ -31,9 +43,38 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Future<void> _onQueryChanged(String query) async {
-    final results = await widget.mapData
-        .searchSuggestions(query, widget.settings.provider);
-    if (mounted) setState(() => _results = results);
+    final provider = widget.settings.provider;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final results = await widget.services
+          .serviceFor(provider)
+          .searchSuggestions(query, provider);
+      if (mounted) {
+        setState(() {
+          _results = results;
+          _loading = false;
+        });
+      }
+    } on MapApiException catch (e) {
+      if (mounted) {
+        setState(() {
+          _results = const [];
+          _error = e.message;
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _results = const [];
+          _error = '搜索失败，请稍后重试';
+          _loading = false;
+        });
+      }
+    }
   }
 
   IconData _iconFor(Poi poi) {
@@ -45,6 +86,7 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
@@ -65,23 +107,53 @@ class _SearchScreenState extends State<SearchScreen> {
           ),
         ],
       ),
-      body: ListView.separated(
-        itemCount: _results.length,
-        separatorBuilder: (_, _) => const Divider(height: 1),
-        itemBuilder: (context, index) {
-          final poi = _results[index];
-          return ListTile(
-            leading: Icon(_iconFor(poi)),
-            title: Text(poi.name),
-            subtitle:
-                Text('${poi.address} · ${formatDistance(poi.distanceMeters)}'),
-            trailing: Text(
-              widget.settings.provider.displayName.replaceAll('地图', ''),
-              style: Theme.of(context).textTheme.bodySmall,
+      body: Column(
+        children: [
+          if (_isSample)
+            Container(
+              width: double.infinity,
+              color: theme.colorScheme.secondaryContainer,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Text(
+                '示例数据：未填 ${widget.settings.provider.keyLabel}，'
+                '当前结果为内置示例，去设置填写后即切换真实搜索',
+                style: theme.textTheme.bodySmall,
+              ),
             ),
-            onTap: () => Navigator.of(context).pop(poi),
-          );
-        },
+          if (_error != null)
+            Container(
+              width: double.infinity,
+              color: theme.colorScheme.errorContainer,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Text(_error!, style: theme.textTheme.bodySmall),
+            ),
+          if (_loading) const LinearProgressIndicator(),
+          Expanded(
+            child: _results.isEmpty && !_loading && _error == null
+                ? const Center(child: Text('没有结果，换个关键词试试'))
+                : ListView.separated(
+                    itemCount: _results.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final poi = _results[index];
+                      return ListTile(
+                        leading: Icon(_iconFor(poi)),
+                        title: Text(poi.name),
+                        subtitle: Text(poi.distanceMeters == null
+                            ? poi.address
+                            : '${poi.address} · '
+                                '${formatDistance(poi.distanceMeters!)}'),
+                        trailing: Text(
+                          widget.settings.provider.displayName
+                              .replaceAll('地图', ''),
+                          style: theme.textTheme.bodySmall,
+                        ),
+                        onTap: () => Navigator.of(context).pop(poi),
+                      );
+                    },
+                  ),
+          ),
+        ],
       ),
     );
   }

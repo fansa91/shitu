@@ -1,0 +1,17 @@
+{
+  "status": 0,
+  "message": "Success",
+  "result": {
+    "routes": [
+      {
+        "id": "fixture-route-1",
+        "mode": "DRIVING",
+        "distance": 12400,
+        "duration": 38,
+        "toll": 5,
+        "polyline": [22.543096, 114.057865, 1000, 1000, 500, 1500],
+        "steps": []
+      }
+    ]
+  }
+}

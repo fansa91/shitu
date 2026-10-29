@@ -1,0 +1,25 @@
+{
+  "status": "1",
+  "info": "OK",
+  "infocode": "10000",
+  "count": "1",
+  "route": {
+    "origin": "113.934527,22.540503",
+    "destination": "114.051325,22.554307",
+    "paths": [
+      {
+        "distance": "2100",
+        "duration": "1680",
+        "steps": [
+          {
+            "instruction": "向北步行",
+            "road": "科苑路",
+            "distance": "2100",
+            "duration": "1680",
+            "polyline": "113.934527,22.540503;114.051325,22.554307"
+          }
+        ]
+      }
+    ]
+  }
+}

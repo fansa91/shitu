@@ -1,0 +1,35 @@
+{
+  "status": "1",
+  "info": "OK",
+  "infocode": "10000",
+  "count": "1",
+  "route": {
+    "origin": "113.934527,22.540503",
+    "destination": "114.118452,22.545541",
+    "paths": [
+      {
+        "distance": "12400",
+        "duration": "2280",
+        "strategy": "速度优先",
+        "tolls": "5",
+        "traffic_lights": "9",
+        "steps": [
+          {
+            "instruction": "向东出发",
+            "road": "科苑路",
+            "distance": "800",
+            "duration": "120",
+            "polyline": "113.934527,22.540503;113.940000,22.542000"
+          },
+          {
+            "instruction": "右转进入深南大道",
+            "road": "深南大道",
+            "distance": "5000",
+            "duration": "900",
+            "polyline": "113.940000,22.542000;114.000000,22.545000"
+          }
+        ]
+      }
+    ]
+  }
+}

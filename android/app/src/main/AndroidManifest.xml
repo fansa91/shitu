@@ -1,8 +1,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 高德地图 SDK 所需权限：联网 + 定位（蓝点/导航） -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <application
         android:label="识途"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <!-- 高德定位服务声明（地图 SDK 定位蓝点依赖）。SDK Key 不写在这里：
+             由 App 在运行时从设置读取，经 AMapWidget 的 apiKey 参数传入。 -->
+        <service android:name="com.amap.api.location.APSService" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

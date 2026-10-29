@@ -1,0 +1,17 @@
+{
+  "status": 0,
+  "message": "ok",
+  "result": {
+    "routes": [
+      {
+        "distance": 12400,
+        "duration": 2280,
+        "toll": 5,
+        "steps": [
+          {"instructions": "向东出发", "distance": 800, "duration": 120, "path": "114.064551,22.548456;114.065551,22.549456"},
+          {"instructions": "进入深南大道", "distance": 5000, "duration": 900, "path": "114.065551,22.549456;114.070000,22.550000"}
+        ]
+      }
+    ]
+  }
+}

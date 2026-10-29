@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/map_provider.dart';
+import '../services/api_exception.dart';
+import '../services/map_data_services.dart';
 import '../services/settings_service.dart';
 
 /// 设置页：数据源单选、Key 管理（用户自填）、申请指南、语音、关于。
@@ -21,7 +23,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   final Map<MapProvider, TextEditingController> _keyControllers = {};
   final _nvidiaController = TextEditingController();
+  final _sdkAndroidController = TextEditingController();
+  final _sdkIosController = TextEditingController();
   final Map<String, String> _testResults = {};
+  final Set<String> _testing = {};
 
   SettingsService get _settings => widget.settings;
 
@@ -33,6 +38,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           TextEditingController(text: _settings.keyFor(p));
     }
     _nvidiaController.text = _settings.nvidiaKey;
+    _sdkAndroidController.text = _settings.amapSdkAndroidKey;
+    _sdkIosController.text = _settings.amapSdkIosKey;
   }
 
   @override
@@ -41,6 +48,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       c.dispose();
     }
     _nvidiaController.dispose();
+    _sdkAndroidController.dispose();
+    _sdkIosController.dispose();
     super.dispose();
   }
 
@@ -49,7 +58,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
-  /// 骨架阶段「测试连接」：仅做本地格式校验，不发起真实 API 请求。
+  /// 「测试连接」：已填 Web Key → 发一次轻量真实请求（地理编码）验活；
+  /// 未填时维持本地格式校验文案。
+  Future<void> _testProviderKey(MapProvider provider) async {
+    final id = provider.name;
+    final value = _keyControllers[provider]!.text.trim();
+    if (value.isEmpty) {
+      _testLocalFormat(id, value);
+      return;
+    }
+    setState(() {
+      _testing.add(id);
+      _testResults[id] = '正在请求${provider.displayName}验活…';
+    });
+    final service = createRealMapDataService(provider, key: value);
+    try {
+      final message = await service!.testConnection();
+      if (mounted) setState(() => _testResults[id] = message);
+    } on MapApiException catch (e) {
+      if (mounted) setState(() => _testResults[id] = '连接失败：${e.message}');
+    } catch (_) {
+      if (mounted) setState(() => _testResults[id] = '连接失败：未知错误');
+    } finally {
+      if (mounted) setState(() => _testing.remove(id));
+    }
+  }
+
+  /// 本地格式校验（未填 Key / 英伟达卡使用，不发起真实请求）。
   void _testLocalFormat(String id, String value) {
     final v = value.trim();
     final String result;
@@ -107,9 +142,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   filled: _settings.hasKeyFor(p),
                   onSave: () async {
                     await _settings.setKeyFor(p, _keyControllers[p]!.text);
-                    _snack('${p.keyLabel} 已保存（改 Key 后需重启 App 生效）');
+                    _snack('${p.keyLabel} 已保存（Web Key 即时生效）');
                   },
+                  onTest: () => _testProviderKey(p),
                 ),
+              _amapSdkCard(),
               _keyCard(
                 id: 'nvidia',
                 title: '英伟达 TTS Key（可选）',
@@ -214,12 +251,92 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  /// 高德原生 SDK Key 卡：Android / iOS 两个字段，与 Web Key 分开申请。
+  /// 运行时由 AmapMapView 在构建时读取（同意隐私后），不硬编码进包。
+  Widget _amapSdkCard() {
+    final filled =
+        _settings.hasAmapSdkAndroidKey || _settings.hasAmapSdkIosKey;
+    Widget field(String label, TextEditingController controller) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 10),
+        child: TextField(
+          controller: controller,
+          obscureText: true,
+          decoration: InputDecoration(
+            labelText: label,
+            hintText: '粘贴你申请的 SDK Key',
+            border: const OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+      );
+    }
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text('高德 SDK Key（底图）',
+                      style: Theme.of(context).textTheme.titleSmall),
+                ),
+                Container(
+                  width: 9,
+                  height: 9,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: filled
+                        ? const Color(0xFF34A853)
+                        : Theme.of(context).colorScheme.outlineVariant,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(filled ? '已填写' : '未填写',
+                    style: Theme.of(context).textTheme.bodySmall),
+              ],
+            ),
+            field('Android Key', _sdkAndroidController),
+            field('iOS Key', _sdkIosController),
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: FilledButton.tonal(
+                onPressed: () async {
+                  await _settings.setAmapSdkKeys(
+                    androidKey: _sdkAndroidController.text,
+                    iosKey: _sdkIosController.text,
+                  );
+                  _snack('高德 SDK Key 已保存（重启 App 并同意隐私后生效）');
+                },
+                child: const Text('保存'),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text(
+                'SDK Key 与 Web Key 是两种 Key，需在高德控制台分别创建。'
+                '未填或未同意隐私时底图使用示意地图。',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _keyCard({
     required String id,
     required String title,
     required TextEditingController controller,
     required bool filled,
     required VoidCallback onSave,
+    VoidCallback? onTest,
   }) {
     final result = _testResults[id];
     return Card(
@@ -269,8 +386,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 const SizedBox(width: 8),
                 OutlinedButton(
-                  onPressed: () => _testLocalFormat(id, controller.text),
-                  child: const Text('测试连接'),
+                  onPressed: _testing.contains(id)
+                      ? null
+                      : (onTest ??
+                          () => _testLocalFormat(id, controller.text)),
+                  child: Text(_testing.contains(id) ? '测试中…' : '测试连接'),
                 ),
               ],
             ),

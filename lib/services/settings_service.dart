@@ -15,8 +15,14 @@ class SettingsService extends ChangeNotifier {
   static const _kKeyNvidia = 'key_nvidia';
   static const _kTtsEngine = 'tts_engine';
   static const _kTtsPresynthesize = 'tts_presynthesize';
+  static const _kAmapSdkAndroidKey = 'amap_sdk_android_key';
+  static const _kAmapSdkIosKey = 'amap_sdk_ios_key';
+  static const _kPrivacyAgreed = 'privacy_agreed';
 
   MapProvider _provider = MapProvider.amap;
+  String _amapSdkAndroidKey = '';
+  String _amapSdkIosKey = '';
+  bool _privacyAgreed = false;
   final Map<MapProvider, String> _keys = {
     for (final p in MapProvider.values) p: '',
   };
@@ -25,6 +31,18 @@ class SettingsService extends ChangeNotifier {
   bool _ttsPresynthesize = true;
 
   MapProvider get provider => _provider;
+
+  /// 高德原生 SDK 的 Android Key（与 Web Key 分开申请、分开填）。
+  String get amapSdkAndroidKey => _amapSdkAndroidKey;
+
+  /// 高德原生 SDK 的 iOS Key。
+  String get amapSdkIosKey => _amapSdkIosKey;
+
+  bool get hasAmapSdkAndroidKey => _amapSdkAndroidKey.trim().isNotEmpty;
+  bool get hasAmapSdkIosKey => _amapSdkIosKey.trim().isNotEmpty;
+
+  /// 用户是否已在首启隐私对话框中同意（同意前绝不初始化地图 SDK）。
+  bool get privacyAgreed => _privacyAgreed;
   TtsEngine get ttsEngine => _ttsEngine;
   bool get ttsPresynthesize => _ttsPresynthesize;
   String get nvidiaKey => _nvidiaKey;
@@ -44,7 +62,29 @@ class SettingsService extends ChangeNotifier {
     _nvidiaKey = prefs.getString(_kKeyNvidia) ?? '';
     _ttsEngine = _ttsFromName(prefs.getString(_kTtsEngine));
     _ttsPresynthesize = prefs.getBool(_kTtsPresynthesize) ?? true;
+    _amapSdkAndroidKey = prefs.getString(_kAmapSdkAndroidKey) ?? '';
+    _amapSdkIosKey = prefs.getString(_kAmapSdkIosKey) ?? '';
+    _privacyAgreed = prefs.getBool(_kPrivacyAgreed) ?? false;
     notifyListeners();
+  }
+
+  Future<void> setAmapSdkKeys({
+    required String androidKey,
+    required String iosKey,
+  }) async {
+    _amapSdkAndroidKey = androidKey.trim();
+    _amapSdkIosKey = iosKey.trim();
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kAmapSdkAndroidKey, _amapSdkAndroidKey);
+    await prefs.setString(_kAmapSdkIosKey, _amapSdkIosKey);
+  }
+
+  Future<void> setPrivacyAgreed(bool value) async {
+    _privacyAgreed = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kPrivacyAgreed, value);
   }
 
   Future<void> setProvider(MapProvider value) async {
