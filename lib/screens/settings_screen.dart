@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../models/map_provider.dart';
+import '../utils/external_link.dart';
 import '../utils/format.dart';
 import '../services/api_exception.dart';
 import '../services/map_data_services.dart';
@@ -121,6 +122,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _snack('已复制：$text');
   }
 
+  /// 打开「获取 Key」控制台外链，失败时提示手动访问。
+  Future<void> _openGetKey(String url) async {
+    final ok = await openExternalUrl(url);
+    if (!ok && mounted) {
+      _snack('打开链接失败，请手动在浏览器访问：$url');
+    }
+  }
+
+  /// Key 卡下方的「获取 Key →」外链文字按钮。
+  Widget _getKeyButton(String url) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: TextButton.icon(
+        onPressed: () => _openGetKey(url),
+        icon: const Icon(Icons.open_in_new, size: 16),
+        label: const Text('获取 Key'),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -158,6 +179,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   title: p.keyLabel,
                   controller: _keyControllers[p]!,
                   filled: _settings.hasKeyFor(p),
+                  getKeyUrl: KeyConsoleUrls.forProvider(p),
                   onSave: () async {
                     await _settings.setKeyFor(p, _keyControllers[p]!.text);
                     _snack('${p.keyLabel} 已保存（Web Key 即时生效）');
@@ -170,6 +192,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 title: '英伟达 TTS Key（可选）',
                 controller: _nvidiaController,
                 filled: _settings.nvidiaKey.isNotEmpty,
+                getKeyUrl: KeyConsoleUrls.nvidia,
                 onSave: () async {
                   await _settings.setNvidiaKey(_nvidiaController.text);
                   _snack('英伟达 TTS Key 已保存');
@@ -334,6 +357,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: const Text('保存'),
               ),
             ),
+            _getKeyButton(KeyConsoleUrls.amap),
             const Padding(
               padding: EdgeInsets.only(top: 8),
               child: Text(
@@ -353,6 +377,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required String title,
     required TextEditingController controller,
     required bool filled,
+    required String getKeyUrl,
     required VoidCallback onSave,
     VoidCallback? onTest,
   }) {
@@ -412,6 +437,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ],
             ),
+            _getKeyButton(getKeyUrl),
             if (result != null)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
