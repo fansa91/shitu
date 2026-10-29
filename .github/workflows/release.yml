@@ -1,0 +1,230 @@
+name: Build releases
+
+# 打包发布：推送 v* 标签或手动触发
+# 产物：Android APK(分架构/自签)、iOS IPA(未签名)、macOS DMG、Windows zip
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  FLUTTER_VERSION: '3.47.7'
+
+jobs:
+  # ---------------- Android ----------------
+  android:
+    name: Android APK (multi-arch, self-signed)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Analyze
+        run: |
+          flutter pub get
+          flutter analyze
+
+      - name: Test
+        run: flutter test
+
+      - name: Prepare self-signed keystore
+        # 想要固定签名以便覆盖安装升级：把 keystore 以 base64 存到
+        # Secrets.ANDROID_KEYSTORE_BASE64，并设置 ANDROID_KEYSTORE_PASSWORD /
+        # ANDROID_KEY_PASSWORD / ANDROID_KEY_ALIAS；否则每次 CI 临时生成。
+        run: |
+          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/release.keystore
+            STORE_PASS="${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
+            KEY_PASS="${{ secrets.ANDROID_KEY_PASSWORD }}"
+            KEY_ALIAS="${{ secrets.ANDROID_KEY_ALIAS }}"
+          else
+            keytool -genkeypair -keystore android/app/release.keystore \
+              -alias selfsigned -keyalg RSA -keysize 2048 -validity 10950 \
+              -storepass android -keypass android \
+              -dname "CN=SelfSigned, OU=Dev, O=Dev, L=Unknown, ST=Unknown, C=CN"
+            STORE_PASS=android
+            KEY_PASS=android
+            KEY_ALIAS=selfsigned
+          fi
+          cat > android/key.properties <<EOF
+          storePassword=$STORE_PASS
+          keyPassword=$KEY_PASS
+          keyAlias=$KEY_ALIAS
+          storeFile=release.keystore
+          EOF
+
+      - run: flutter pub get
+      - name: Resolve version from tag
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF#refs/tags/v}"; else V="0.1.0"; fi
+          IFS='.' read -ra P <<< "$V"; while [ ${#P[@]} -lt 3 ]; do P+=(0); done
+          echo "BUILD_NAME=${P[0]}.${P[1]}.${P[2]}" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=${{ github.run_number }}" >> "$GITHUB_ENV"
+      - run: flutter build apk --release --split-per-abi --build-name=${{ env.BUILD_NAME }} --build-number=${{ env.BUILD_NUMBER }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: build/app/outputs/flutter-apk/app-*-release.apk
+
+  # ---------------- iOS ----------------
+  ios:
+    name: iOS IPA (unsigned)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - run: flutter pub get
+      - name: Resolve version from tag
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF#refs/tags/v}"; else V="0.1.0"; fi
+          IFS='.' read -ra P <<< "$V"; while [ ${#P[@]} -lt 3 ]; do P+=(0); done
+          echo "BUILD_NAME=${P[0]}.${P[1]}.${P[2]}" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=${{ github.run_number }}" >> "$GITHUB_ENV"
+      - run: flutter build ipa --release --no-codesign --build-name=${{ env.BUILD_NAME }} --build-number=${{ env.BUILD_NUMBER }}
+
+      - name: Package unsigned IPA (fallback if flutter export missed it)
+        run: |
+          if ls build/ios/ipa/*.ipa 1>/dev/null 2>&1; then
+            echo "IPA already exported by flutter"
+            exit 0
+          fi
+          APP_PATH=$(find build/ios/archive -name "Runner.app" -type d 2>/dev/null | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "No Runner.app found in archive" && exit 1
+          fi
+          echo "Packaging $APP_PATH"
+          rm -rf /tmp/ipapack && mkdir -p /tmp/ipapack/Payload build/ios/ipa
+          cp -R "$APP_PATH" /tmp/ipapack/Payload/
+          cd /tmp/ipapack && zip -qry "$OLDPWD/build/ios/ipa/shitu-unsigned.ipa" Payload
+          ls -la "$OLDPWD/build/ios/ipa/"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: build/ios/ipa/*.ipa
+
+  # ---------------- macOS ----------------
+  macos:
+    name: macOS DMG
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - run: flutter pub get
+      - name: Resolve version from tag
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF#refs/tags/v}"; else V="0.1.0"; fi
+          IFS='.' read -ra P <<< "$V"; while [ ${#P[@]} -lt 3 ]; do P+=(0); done
+          echo "BUILD_NAME=${P[0]}.${P[1]}.${P[2]}" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=${{ github.run_number }}" >> "$GITHUB_ENV"
+      - run: flutter build macos --release --build-name=${{ env.BUILD_NAME }} --build-number=${{ env.BUILD_NUMBER }}
+
+      - name: Create DMG
+        run: |
+          brew install create-dmg
+          APP_PATH=$(find build/macos/Build/Products/Release -maxdepth 1 -name "*.app" -print -quit)
+          echo "App: $APP_PATH"
+          APP_NAME=$(basename "$APP_PATH" .app)
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then VERSION="${GITHUB_REF#refs/tags/v}"; else VERSION="dev"; fi
+          mkdir -p dist
+          create-dmg \
+            --volname "识途" \
+            --window-pos 200 120 \
+            --window-size 640 400 \
+            --icon-size 100 \
+            --icon "$APP_NAME" 175 120 \
+            --hide-extension "$APP_NAME" \
+            --app-drop-link 475 120 \
+            "dist/shitu-${VERSION}-macos.dmg" \
+            "$APP_PATH"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: dist/*.dmg
+
+  # ---------------- Windows ----------------
+  windows:
+    name: Windows ZIP
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - run: flutter pub get
+      - name: Resolve version from tag
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -match '^refs/tags/v(.+)$') { $v = $Matches[1] } else { $v = '0.1.0' }
+          $p = $v.Split('.'); while ($p.Count -lt 3) { $p += '0' }
+          "BUILD_NAME=$($p -join '.')" | Out-File -Append $env:GITHUB_ENV
+          "BUILD_NUMBER=${{ github.run_number }}" | Out-File -Append $env:GITHUB_ENV
+      - run: flutter build windows --release --build-name=${{ env.BUILD_NAME }} --build-number=${{ env.BUILD_NUMBER }}
+
+      - name: Zip
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -match '^refs/tags/v(.+)$') { $version = $Matches[1] } else { $version = 'dev' }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath "dist\shitu-$version-windows-x64.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-zip
+          path: dist/*.zip
+
+  # ---------------- Release ----------------
+  release:
+    name: Publish GitHub Release
+    needs: [android, ios, macos, windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          body: |
+            识途 Shitu 首个版本。
+
+            资产说明：
+            - Android：app-*-release.apk（分架构，CI 临时自签，不可与后续构建覆盖升级）
+            - iOS：未签名 IPA（需自签后安装）
+            - macOS：DMG
+            - Windows：x64 ZIP
+          generate_release_notes: true
