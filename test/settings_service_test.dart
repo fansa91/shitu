@@ -50,6 +50,17 @@ void main() {
     expect(reloaded.ttsPresynthesize, isFalse);
   });
 
+  test('地图兼容模式：默认关，存取往返', () async {
+    final service = SettingsService();
+    await service.load();
+    expect(service.mapCompatMode, isFalse);
+
+    await service.setMapCompatMode(true);
+    final reloaded = SettingsService();
+    await reloaded.load();
+    expect(reloaded.mapCompatMode, isTrue);
+  });
+
   test('外观偏好：默认值与存取往返', () async {
     final service = SettingsService();
     await service.load();

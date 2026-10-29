@@ -5,6 +5,7 @@ import 'package:x_amap_base/x_amap_base.dart';
 import '../models/geo_point.dart';
 import '../models/poi.dart';
 import '../services/amap_sdk_service.dart';
+import '../services/map_crash_guard.dart';
 import '../services/settings_service.dart';
 import 'app_map.dart';
 import 'fake_map.dart';
@@ -28,6 +29,8 @@ class AmapMapView extends StatefulWidget {
     this.handle,
     this.myLocation,
     this.tilt = 0,
+    this.crashGuard,
+    this.compatMode = false,
     this.onCameraSettled,
     this.onUserDragged,
   });
@@ -45,6 +48,14 @@ class AmapMapView extends StatefulWidget {
   /// 相机倾斜角：0 = 2D，约 58 = 3D。
   final double tilt;
 
+  /// 崩溃面包屑/自保（可选）：建图链路逐点落盘，原生崩溃后下次启动据此
+  /// 定位停在哪一步并自动回落示意地图。为空时不记录、不影响功能。
+  final MapCrashGuard? crashGuard;
+
+  /// 兼容模式：只用最保守渲染配置建图（关建筑/路况/指南针/比例尺/
+  /// 标注/POI 点击、相机不倾斜），排查原生渲染崩溃时用。
+  final bool compatMode;
+
   final void Function(GeoPoint center, double zoom)? onCameraSettled;
   final VoidCallback? onUserDragged;
 
@@ -61,6 +72,9 @@ class _AmapMapViewState extends State<AmapMapView> {
   /// 最近一次已知的缩放（onCameraMoveEnd 回报），命令未指定 zoom 时沿用。
   double _lastZoom = 12;
 
+  /// 「地图创建开始」面包屑只落一次（build 可能多次执行）。
+  bool _createMarked = false;
+
   /// 程序主动移动相机的目标点。相机停稳后若实际中心明显偏离它，
   /// 判定为用户手动拖图（触发 onUserDragged，用于解除跟随锁定）。
   LatLng? _expectedTarget;
@@ -74,10 +88,22 @@ class _AmapMapViewState extends State<AmapMapView> {
     // AmapSdkService 的门控单飞执行，完成前绝不创建 AMapWidget，
     // 消除「冷启动带着已存 Key 直达建图」时初始化与建图的竞态；
     // Key 变化时 AppMap 用 ValueKey 换掉本 State，旧图先销毁再走新一轮。
+    // 面包屑第一步在调插件初始化之前落盘：若原生初始化本身崩，
+    // 下一轮启动能看到序列停在 sdk_init_start。
+    widget.crashGuard?.markStep(MapBreadcrumbStep.sdkInitStart);
     _initFuture = AmapSdkService.instance.runPluginInit(
       widget.settings,
       () async => _doPluginInit(),
     );
+    _initFuture.then((ok) {
+      if (ok) {
+        widget.crashGuard?.markStep(MapBreadcrumbStep.sdkInitDone);
+      } else {
+        // 初始化在 Dart 层失败并已回落示意地图：本轮安全收尾，
+        // 落一个正常销毁标记，避免下一轮被误判为原生崩溃触发自保。
+        widget.crashGuard?.markStep(MapBreadcrumbStep.mapDisposedClean);
+      }
+    });
   }
 
   /// 把运行时 Key 与隐私同意状态注入插件（由门控保证同一 Key 只跑一次）。
@@ -177,6 +203,9 @@ class _AmapMapViewState extends State<AmapMapView> {
 
   @override
   void dispose() {
+    // 能走到 dispose 说明 Flutter 正常拆除了地图（原生崩溃时进程直接
+    // 死、不会有这一步），落正常销毁标记给下一轮自保判定。
+    widget.crashGuard?.markStep(MapBreadcrumbStep.mapDisposedClean);
     widget.handle?.detach();
     super.dispose();
   }
@@ -277,22 +306,43 @@ class _AmapMapViewState extends State<AmapMapView> {
         (widget.selectedRoutePoints.isNotEmpty
             ? widget.selectedRoutePoints.first
             : null);
+    // 面包屑：即将把创建参数交给原生 TextureMapView——原生崩溃最可能
+    // 发生在这一步到 onMapCreated 之间，序列停在这里即指向该窗口。
+    if (!_createMarked) {
+      _createMarked = true;
+      widget.crashGuard?.markStep(MapBreadcrumbStep.mapCreateStart);
+    }
+    final compat = widget.compatMode;
     return AMapWidget(
       initialCameraPosition: CameraPosition(
         target: focus != null
             ? _toLatLng(focus)
             : const LatLng(22.54554, 114.05769), // 深圳市中心
         zoom: 12,
-        tilt: widget.tilt,
+        tilt: compat ? 0 : widget.tilt,
       ),
       // 关闭 SDK 自带蓝点：位置由 geolocator 提供并自绘标记，避免双蓝点。
       myLocationStyleOptions: MyLocationStyleOptions(false),
-      trafficEnabled: widget.trafficEnabled,
-      buildingsEnabled: widget.tilt > 0,
+      // 兼容模式：关掉一切可选渲染项（建筑/路况/指南针/比例尺/标注/
+      // POI 点击），只留最基础的底图；手势保持插件默认不动。
+      // 注：插件 1.0.15 未公开室内图/缩放控件开关，无从设置。
+      trafficEnabled: compat ? false : widget.trafficEnabled,
+      buildingsEnabled: compat ? false : widget.tilt > 0,
+      compassEnabled: false,
+      scaleEnabled: !compat,
+      labelsEnabled: !compat,
+      touchPoiEnabled: !compat,
       markers: markers,
       polylines: polylines,
       onCameraMoveEnd: _onCameraMoveEnd,
       onMapCreated: (controller) {
+        widget.crashGuard?.markStep(MapBreadcrumbStep.onMapCreated);
+        // 再过一帧仍活着，才算真正迈过建图崩溃窗口。
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            widget.crashGuard?.markStep(MapBreadcrumbStep.firstFrame);
+          }
+        });
         _controller = controller;
         widget.handle?.attach(
           move: _handleMove,

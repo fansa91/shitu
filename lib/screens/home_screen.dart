@@ -10,6 +10,7 @@ import '../models/poi.dart';
 import '../services/amap_sdk_service.dart';
 import '../services/history_service.dart';
 import '../services/location_service.dart';
+import '../services/map_crash_guard.dart';
 import '../services/map_data_services.dart';
 import '../services/places_service.dart';
 import '../services/settings_service.dart';
@@ -36,6 +37,7 @@ class HomeScreen extends StatefulWidget {
     required this.places,
     required this.tracks,
     required this.history,
+    this.crashGuard,
   });
 
   final SettingsService settings;
@@ -43,6 +45,9 @@ class HomeScreen extends StatefulWidget {
   final PlacesService places;
   final TrackService tracks;
   final HistoryService history;
+
+  /// 地图崩溃面包屑/自保（可选）：透传给 AppMap 与各子页面。
+  final MapCrashGuard? crashGuard;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -261,7 +266,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _openSettings() {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => SettingsScreen(settings: _settings)),
+      MaterialPageRoute(
+        builder: (_) => SettingsScreen(
+          settings: _settings,
+          crashGuard: widget.crashGuard,
+        ),
+      ),
     );
   }
 
@@ -276,6 +286,7 @@ class _HomeScreenState extends State<HomeScreen> {
           tracks: widget.tracks,
           history: widget.history,
           initialOrigin: initialOrigin,
+          crashGuard: widget.crashGuard,
         ),
       ),
     );
@@ -363,15 +374,21 @@ class _HomeScreenState extends State<HomeScreen> {
     } else if (result is OfflineRoute) {
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) =>
-              OfflineRouteScreen(route: result, settings: _settings),
+          builder: (_) => OfflineRouteScreen(
+            route: result,
+            settings: _settings,
+            crashGuard: widget.crashGuard,
+          ),
         ),
       );
     } else if (result is NavTrack) {
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) =>
-              TrackReplayScreen(track: result, settings: _settings),
+          builder: (_) => TrackReplayScreen(
+            track: result,
+            settings: _settings,
+            crashGuard: widget.crashGuard,
+          ),
         ),
       );
     }
@@ -382,7 +399,9 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: _settings,
+      // 同时听自保状态：设置里点「重试真实地图」清掉自保后，
+      // 回到主页要立刻重建、重新尝试真实地图。
+      listenable: Listenable.merge([_settings, widget.crashGuard]),
       builder: (context, _) {
         return Scaffold(
           body: LayoutBuilder(
@@ -404,6 +423,7 @@ class _HomeScreenState extends State<HomeScreen> {
       handle: _mapHandle,
       myLocation: _myLocation,
       tilt: _tilt,
+      crashGuard: widget.crashGuard,
       onCameraSettled: _onCameraSettled,
       onUserDragged: _onUserDragged,
     );

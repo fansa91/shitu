@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/nav_track.dart';
+import '../services/map_crash_guard.dart';
 import '../services/settings_service.dart';
 import '../utils/format.dart';
 import '../widgets/app_map.dart';
@@ -12,10 +13,14 @@ class TrackReplayScreen extends StatelessWidget {
     super.key,
     required this.track,
     required this.settings,
+    this.crashGuard,
   });
 
   final NavTrack track;
   final SettingsService settings;
+
+  /// 地图崩溃面包屑/自保（可选）：透传给 AppMap。
+  final MapCrashGuard? crashGuard;
 
   @override
   Widget build(BuildContext context) {
@@ -30,6 +35,7 @@ class TrackReplayScreen extends StatelessWidget {
               settings: settings,
               selectedRoutePoints: track.points,
               showLocationDot: false,
+              crashGuard: crashGuard,
             ),
           ),
           Material(

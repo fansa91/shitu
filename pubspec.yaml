@@ -35,6 +35,7 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   shared_preferences: ^2.3.2
+  path_provider: ^2.1.5
   http: ^1.2.2
   dynamic_color: ^1.7.0
   amap_map: ^1.0.15

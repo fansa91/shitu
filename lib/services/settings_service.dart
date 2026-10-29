@@ -31,6 +31,7 @@ class SettingsService extends ChangeNotifier {
   static const _kAmapSdkIosKey = 'amap_sdk_ios_key';
   static const _kPrivacyAgreed = 'privacy_agreed';
   static const _kNvidiaVoice = 'nvidia_voice';
+  static const _kMapCompatMode = 'map_compat_mode';
   static const _kThemeMode = 'theme_mode';
   static const _kDynamicColor = 'dynamic_color_enabled';
   static const _kSeedColorValue = 'seed_color_value';
@@ -46,6 +47,7 @@ class SettingsService extends ChangeNotifier {
   String _nvidiaVoice = 'Siwei';
   TtsEngine _ttsEngine = TtsEngine.system;
   bool _ttsPresynthesize = true;
+  bool _mapCompatMode = false;
   AppThemeMode _themeMode = AppThemeMode.system;
   bool _dynamicColorEnabled = true;
   int _seedColorValue = 0xFF1A73E8; // brandSeedColor 的 ARGB
@@ -69,6 +71,10 @@ class SettingsService extends ChangeNotifier {
 
   /// 英伟达音色短名（见 tts_service.nvidiaVoiceNames），默认 Siwei。
   String get nvidiaVoice => _nvidiaVoice;
+
+  /// 地图兼容模式：开时 AMapWidget 只用最保守渲染配置（关建筑/路况/
+  /// 指南针/比例尺/标注/POI 点击），供真实地图崩溃或老设备时排查与保底。
+  bool get mapCompatMode => _mapCompatMode;
 
   /// 外观：主题模式 / 是否跟随系统动态取色 / 自定义种子色。
   AppThemeMode get themeMode => _themeMode;
@@ -99,6 +105,7 @@ class SettingsService extends ChangeNotifier {
     _ttsEngine = _ttsFromName(prefs.getString(_kTtsEngine));
     _ttsPresynthesize = prefs.getBool(_kTtsPresynthesize) ?? true;
     _privacyAgreed = prefs.getBool(_kPrivacyAgreed) ?? false;
+    _mapCompatMode = prefs.getBool(_kMapCompatMode) ?? false;
     _themeMode = _themeModeFromName(prefs.getString(_kThemeMode));
     _dynamicColorEnabled = prefs.getBool(_kDynamicColor) ?? true;
     _seedColorValue = prefs.getInt(_kSeedColorValue) ?? _seedColorValue;
@@ -178,6 +185,13 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kPrivacyAgreed, value);
+  }
+
+  Future<void> setMapCompatMode(bool value) async {
+    _mapCompatMode = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kMapCompatMode, value);
   }
 
   Future<void> setProvider(MapProvider value) async {

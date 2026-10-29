@@ -8,15 +8,21 @@ import '../utils/external_link.dart';
 import '../utils/format.dart';
 import '../services/amap_sdk_service.dart';
 import '../services/api_exception.dart';
+import '../services/app_signature_service.dart';
+import '../services/map_crash_guard.dart';
 import '../services/map_data_services.dart';
 import '../services/settings_service.dart';
 import '../services/tts_service.dart';
 
 /// 设置页：数据源单选、Key 管理（用户自填）、申请指南、语音、关于。
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key, required this.settings});
+  const SettingsScreen({super.key, required this.settings, this.crashGuard});
 
   final SettingsService settings;
+
+  /// 地图崩溃面包屑/自保（可选）：诊断区展示步骤序列，自保触发时
+  /// 本页提供「重试真实地图」入口。
+  final MapCrashGuard? crashGuard;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -48,6 +54,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _sdkAndroidController.text = _settings.amapSdkAndroidKey;
     _sdkIosController.text = _settings.amapSdkIosKey;
     _loadVersion();
+    _loadRuntimeSignature();
   }
 
   /// 试听专用系统 TTS 实例（独立于导航页的实例，探活结果可复用）。
@@ -66,6 +73,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (!mounted) return;
       setState(() => _versionText = '版本未知');
     }
+  }
+
+  /// 本机运行时签名 SHA1（原生通道读取实际安装包的证书）：
+  /// 与代码里预期的发布 SHA1 对照，即可判断高德控制台该填哪个值。
+  String? _runtimeSha1;
+  String? _signatureNote = '读取中…';
+
+  Future<void> _loadRuntimeSignature() async {
+    final result = await AppSignatureService().fetchSha1();
+    if (!mounted) return;
+    setState(() {
+      _runtimeSha1 = result.sha1;
+      _signatureNote = result.error;
+    });
   }
 
   @override
@@ -173,6 +194,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _copy(String text) {
     Clipboard.setData(ClipboardData(text: text));
     _snack('已复制：$text');
+  }
+
+  /// 「高德地图 SDK 状态」诊断全文：初始化状态 + 建图面包屑序列 +
+  /// 运行时/预期签名 SHA1，一次复制即可整段报出来定位崩溃停在哪一步。
+  String _sdkDiagnosticReport() {
+    final lines = <String>[AmapSdkService.instance.diagnosticText];
+    final guard = widget.crashGuard;
+    if (guard != null) lines.add(guard.breadcrumbReport());
+    lines.add('本机运行时 SHA1：${_runtimeSha1 ?? _signatureNote ?? '未知'}');
+    lines.add('发布 SHA1（预期）：$_releaseSha1');
+    return lines.join('\n');
   }
 
   /// 打开「获取 Key」控制台外链，失败时提示手动访问。
@@ -291,6 +323,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   onTest: () => _testProviderKey(p),
                 ),
               _amapSdkCard(),
+              _sectionTitle('地图'),
+              Card(
+                child: Column(
+                  children: [
+                    SwitchListTile(
+                      title: const Text('地图兼容模式'),
+                      subtitle: const Text(
+                          '开启后真实地图只用最保守渲染（关建筑/路况/指南针/比例尺/标注），'
+                          '真实地图崩溃或老设备异常时开启再重试'),
+                      value: _settings.mapCompatMode,
+                      onChanged: _settings.setMapCompatMode,
+                    ),
+                    if (widget.crashGuard?.guardTripped ?? false)
+                      ListTile(
+                        leading: const Icon(Icons.warning_amber_outlined),
+                        title: const Text('真实地图自保中'),
+                        subtitle: Text(
+                          '上次打开真实地图时崩溃（停在步骤：'
+                          '${widget.crashGuard!.stoppedAt?.label ?? '未知'}），'
+                          '已自动使用示意地图。建议先开启上方兼容模式再重试。',
+                        ),
+                        trailing: FilledButton.tonal(
+                          onPressed: () {
+                            widget.crashGuard!.clearGuardForRetry();
+                            setState(() {});
+                            _snack('已清除自保，回到主页将重新加载真实地图');
+                          },
+                          child: const Text('重试真实地图'),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
               _keyCard(
                 id: 'nvidia',
                 title: '英伟达 TTS Key（可选）',
@@ -318,7 +383,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ),
                     _copyRow('包名 / Bundle ID', _packageName),
-                    _copyRow('发布 SHA1', _releaseSha1),
+                    _copyRow('发布 SHA1（预期）', _releaseSha1),
+                    if (_runtimeSha1 != null)
+                      _copyRow('本机运行时 SHA1', _runtimeSha1!)
+                    else
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          '本机运行时 SHA1：${_signatureNote ?? '读取失败'}',
+                          style: const TextStyle(fontSize: 12.5),
+                        ),
+                      ),
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        '高德控制台应填「本机运行时 SHA1」：它来自实际安装包的签名证书，'
+                        '与控制台登记值不一致时高德 SDK 会鉴权失败。'
+                        '若它与上方发布 SHA1 不同，说明当前装的不是正式签名包。',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -384,14 +468,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       title: const Text('识途'),
                       subtitle: Text(_versionText ?? '版本加载中…'),
                     ),
-                    // 诊断信息：地图 SDK 初始化状态（含失败原因），
-                    // 方便真机出问题时用户直接把这行报出来。
+                    // 诊断信息：地图 SDK 初始化状态 + 建图步骤面包屑 +
+                    // 运行时签名 SHA1，真机出问题时整段复制报出来即可定位。
                     ListenableBuilder(
-                      listenable: AmapSdkService.instance,
+                      listenable: Listenable.merge(
+                          [AmapSdkService.instance, widget.crashGuard]),
                       builder: (context, _) => ListTile(
                         title: const Text('高德地图 SDK 状态'),
-                        subtitle:
-                            Text(AmapSdkService.instance.diagnosticText),
+                        subtitle: Text(_sdkDiagnosticReport()),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.copy_outlined, size: 18),
+                          tooltip: '复制诊断信息',
+                          onPressed: () {
+                            Clipboard.setData(
+                                ClipboardData(text: _sdkDiagnosticReport()));
+                            _snack('诊断信息已复制');
+                          },
+                        ),
                       ),
                     ),
                   ],

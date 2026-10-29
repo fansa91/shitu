@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/geo_point.dart';
 import '../models/poi.dart';
 import '../services/amap_sdk_service.dart';
+import '../services/map_crash_guard.dart';
 import '../services/settings_service.dart';
 import 'amap_map_view.dart';
 import 'fake_map.dart';
@@ -57,6 +58,7 @@ class AppMap extends StatelessWidget {
     this.handle,
     this.myLocation,
     this.tilt = 0,
+    this.crashGuard,
     this.onCameraSettled,
     this.onUserDragged,
   });
@@ -78,6 +80,10 @@ class AppMap extends StatelessWidget {
   /// 相机倾斜角：0 = 2D，约 58 = 3D。
   final double tilt;
 
+  /// 地图崩溃面包屑/自保（可选）：自保触发时本组件直接回落 [FakeMap]
+  /// 并挂横幅，不再尝试创建真实地图，避免崩溃循环。
+  final MapCrashGuard? crashGuard;
+
   /// 相机停稳回调：回传中心点与缩放（页面据此保持 2D/3D 与跟随状态）。
   final void Function(GeoPoint center, double zoom)? onCameraSettled;
 
@@ -86,6 +92,10 @@ class AppMap extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final guard = crashGuard;
+    if (!dark && guard != null && guard.guardTripped) {
+      return _guardFallback(guard);
+    }
     if (!dark && AmapSdkService.instance.canShowRealMap(settings)) {
       return AmapMapView(
         // Key 变化 → 换掉旧 State/平台视图，先销毁旧图再按新 Key 初始化。
@@ -98,6 +108,8 @@ class AppMap extends StatelessWidget {
         handle: handle,
         myLocation: myLocation,
         tilt: tilt,
+        crashGuard: guard,
+        compatMode: settings.mapCompatMode,
         onCameraSettled: onCameraSettled,
         onUserDragged: onUserDragged,
       );
@@ -107,6 +119,40 @@ class AppMap extends StatelessWidget {
       showRoute: selectedRoutePoints.isNotEmpty,
       showDestinationPin: selectedPoi != null,
       showLocationDot: showLocationDot,
+    );
+  }
+
+  /// 自保回落：上一轮死在建图过程中，本轮不再碰真实地图，
+  /// 横幅把停留步骤说清，并指引去设置重试（可先开兼容模式）。
+  Widget _guardFallback(MapCrashGuard guard) {
+    final stopped = guard.stoppedAt?.label ?? '未知步骤';
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: FakeMap(
+            showRoute: selectedRoutePoints.isNotEmpty,
+            showDestinationPin: selectedPoi != null,
+            showLocationDot: showLocationDot,
+          ),
+        ),
+        Positioned(
+          top: 8,
+          left: 8,
+          right: 8,
+          child: Material(
+            color: Colors.amber.shade100,
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Text(
+                '上次打开真实地图时崩溃（停在步骤：$stopped），已自动切换示意地图。'
+                '可在设置中开启「地图兼容模式」后点「重试真实地图」再试。',
+                style: const TextStyle(fontSize: 12, color: Colors.black87),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
