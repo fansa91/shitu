@@ -127,13 +127,13 @@ packages:
     source: hosted
     version: "6.0.0"
   flutter_plugin_android_lifecycle:
-    dependency: transitive
+    dependency: "direct overridden"
     description:
       name: flutter_plugin_android_lifecycle
-      sha256: "3854fe5e3bff0b113c658f260b90c95dea17c92db0f2addeac2e343dd9969785"
+      sha256: "1c2b787f99bdca1f3718543f81d38aa1b124817dfeb9fb196201bea85b6134bf"
       url: "https://pub.dev"
     source: hosted
-    version: "2.0.35"
+    version: "2.0.26"
   flutter_test:
     dependency: "direct dev"
     description: flutter

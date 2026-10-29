@@ -41,6 +41,13 @@ dependencies:
   x_amap_base: ^1.0.3
   package_info_plus: ^10.2.2
   url_launcher: ^6.3.3
+dependency_overrides:
+  # amap_map 1.0.15 的 android/build.gradle 写死 compileSdk 35；
+  # flutter_plugin_android_lifecycle 2.0.29+ 改用 flutter.compileSdkVersion(36)，
+  # 其 AAR 元数据要求消费方 compileSdk >= 36，会让 :amap_map:checkReleaseAarMetadata 失败。
+  # 2.0.26 仍是 compileSdk 35 且在 amap_map 的 ^2.0.21 约束内，钉住它。
+  flutter_plugin_android_lifecycle: 2.0.26
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
