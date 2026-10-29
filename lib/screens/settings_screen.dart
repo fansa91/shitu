@@ -6,6 +6,7 @@ import '../models/map_provider.dart';
 import '../theme/appearance.dart';
 import '../utils/external_link.dart';
 import '../utils/format.dart';
+import '../services/amap_sdk_service.dart';
 import '../services/api_exception.dart';
 import '../services/map_data_services.dart';
 import '../services/settings_service.dart';
@@ -48,6 +49,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _sdkIosController.text = _settings.amapSdkIosKey;
     _loadVersion();
   }
+
+  /// 试听专用系统 TTS 实例（独立于导航页的实例，探活结果可复用）。
+  final _previewTts = SystemTtsService();
 
   /// 「关于」版本号：运行时读构建信息（pubspec / CI tag 注入），不在代码里写死。
   String? _versionText;
@@ -120,28 +124,50 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _testResults[id] = result);
   }
 
-  /// 试听：系统引擎直接朗读；英伟达引擎先走预合成探活——
-  /// 不可用则明确提示原因，并用系统语音朗读同一句（不无声失败、
-  /// 不假装是英伟达音色在播）。
+  /// 试听：先探活系统 TTS（无引擎/缺中文语音数据都要让用户看见原因，
+  /// 不再无声失败）；英伟达引擎先走预合成探活，不可用则明确提示原因
+  /// 并回落系统语音试听（不假装是英伟达音色在播）。
   Future<void> _previewVoice() async {
     const sample = '前方三百米右转，进入深南大道';
+    final readiness = await _previewTts.probe();
+    if (!mounted) return;
+    if (!readiness.available) {
+      _snack('语音不可用：${readiness.error}');
+      return;
+    }
     if (_settings.ttsEngine == TtsEngine.system) {
-      await SystemTtsService().speak(sample);
-      _snack('正在用系统语音试听');
+      await _speakPreviewSample(sample, readiness);
       return;
     }
     final service = NvidiaTtsService(
       apiKey: _settings.nvidiaKey,
       voice: _settings.nvidiaVoice,
-      fallback: SystemTtsService(),
+      fallback: _previewTts,
     );
     final report = await service.presynthesize(const [sample]);
-    if (!report.available) {
-      await service.speak(sample); // 内部回落系统 TTS 朗读
-      _snack('英伟达合成暂不可用：${report.reason} 已用系统语音试听');
+    if (!mounted) return;
+    if (report.available) {
+      await service.speak(sample);
       return;
     }
-    await service.speak(sample);
+    _snack('英伟达合成暂不可用：${report.reason}。下面用系统语音试听');
+    await _speakPreviewSample(sample, readiness);
+  }
+
+  /// 系统语音试听（含英伟达回落）：等播完/报错才给反馈；
+  /// 中文语音数据缺失时改播一句英文确认引擎本身能出声。
+  Future<void> _speakPreviewSample(String sample, TtsReadiness readiness) async {
+    if (readiness.warning != null) {
+      _snack(readiness.warning!);
+      await _previewTts.speakAndWait(
+        'Voice test. The speech engine is working.',
+        timeout: const Duration(seconds: 6),
+      );
+      return;
+    }
+    final result = await _previewTts.speakAndWait(sample);
+    if (!mounted) return;
+    _snack(result ?? '试听完成（系统语音）');
   }
 
   void _copy(String text) {
@@ -352,9 +378,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               _sectionTitle('关于'),
               Card(
-                child: ListTile(
-                  title: const Text('识途'),
-                  subtitle: Text(_versionText ?? '版本加载中…'),
+                child: Column(
+                  children: [
+                    ListTile(
+                      title: const Text('识途'),
+                      subtitle: Text(_versionText ?? '版本加载中…'),
+                    ),
+                    // 诊断信息：地图 SDK 初始化状态（含失败原因），
+                    // 方便真机出问题时用户直接把这行报出来。
+                    ListenableBuilder(
+                      listenable: AmapSdkService.instance,
+                      builder: (context, _) => ListTile(
+                        title: const Text('高德地图 SDK 状态'),
+                        subtitle:
+                            Text(AmapSdkService.instance.diagnosticText),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],

@@ -61,6 +61,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
   double _simAlong = 0;
   bool _muted = false;
   bool _summaryShown = false;
+  bool _ttsErrorShown = false;
 
   // 偏航重规划
   bool _rerouting = false;
@@ -83,7 +84,14 @@ class _NavigationScreenState extends State<NavigationScreen> {
       originName: widget.originName,
       destinationName: widget.destinationName,
       onAnnounce: (text) {
-        if (!_muted) _tts.speak(text);
+        if (_muted) return;
+        // 播报失败（如无可用引擎）只提示一次，不再静默无声。
+        _tts.speak(text).catchError((Object e) {
+          if (e is TtsUnavailableException && mounted && !_ttsErrorShown) {
+            _ttsErrorShown = true;
+            _snack('语音播报不可用：${e.reason}');
+          }
+        });
       },
     );
     _nav.addListener(_onNavChanged);
@@ -280,8 +288,18 @@ class _NavigationScreenState extends State<NavigationScreen> {
     }
   }
 
-  void _showVoiceStatus() {
+  Future<void> _showVoiceStatus() async {
     final tts = _tts;
+    if (tts is SystemTtsService) {
+      final readiness = await tts.probe();
+      if (!mounted) return;
+      if (!readiness.available) {
+        _snack('系统语音不可用：${readiness.error}');
+      } else {
+        _snack(readiness.warning ?? '当前播报引擎：系统语音（引擎已就绪）');
+      }
+      return;
+    }
     if (tts is NvidiaTtsService && tts.lastFallbackReason != null) {
       _snack('英伟达播报状态：${tts.lastFallbackReason}（当前实际使用系统语音）');
     } else if (widget.settings.ttsEngine == TtsEngine.nvidia) {
