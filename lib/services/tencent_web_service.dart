@@ -32,6 +32,27 @@ Map<String, dynamic> _ensureTencentOk(Map<String, dynamic> json) {
   return result is Map<String, dynamic> ? result : const {};
 }
 
+/// 解析腾讯输入提示（place/v1/suggestion）响应（纯函数，供单测）。
+/// data 项结构同搜索：title/address/category/location{lat,lng}。
+List<Poi> parseTencentSuggestionJson(Map<String, dynamic> json) {
+  _ensureTencentOk(json);
+  final data = json['data'];
+  if (data is! List) return const [];
+  final pois = <Poi>[];
+  for (final raw in data.whereType<Map<String, dynamic>>()) {
+    final name = raw['title']?.toString() ?? '';
+    if (name.isEmpty) continue;
+    pois.add(Poi(
+      id: raw['id']?.toString() ?? 'tencent-tip-$name',
+      name: name,
+      address: raw['address']?.toString() ?? '',
+      category: raw['category']?.toString() ?? '',
+      location: _tencentLocation(raw['location']),
+    ));
+  }
+  return pois;
+}
+
 /// 解析腾讯地点搜索响应（纯函数，供 fixture 单测）。腾讯返回即 GCJ-02。
 List<Poi> parseTencentSearchJson(Map<String, dynamic> json) {
   _ensureTencentOk(json);
@@ -201,6 +222,16 @@ class TencentWebService implements MapDataService {
       providerName: _providerName,
     );
     return parseTencentSearchJson(json);
+  }
+
+  @override
+  Future<List<Poi>> inputTips(String query, MapProvider provider) async {
+    if (query.trim().isEmpty) return const [];
+    final json = await _api.getJson(
+      _uri('/ws/place/v1/suggestion', {'keyword': query.trim()}),
+      providerName: _providerName,
+    );
+    return parseTencentSuggestionJson(json);
   }
 
   @override

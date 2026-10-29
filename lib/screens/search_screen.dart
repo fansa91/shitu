@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../models/poi.dart';
@@ -31,6 +33,8 @@ class _SearchScreenState extends State<SearchScreen> {
   String? _error;
   bool _loading = false;
   String _query = '';
+  Timer? _debounce;
+  int _requestSeq = 0;
 
   bool get _showHistory =>
       _query.trim().isEmpty && widget.history.searches.isNotEmpty;
@@ -46,51 +50,87 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _controller.dispose();
     super.dispose();
   }
 
-  Future<void> _onQueryChanged(String query) async {
-    final provider = widget.settings.provider;
+  /// 打字：防抖 300ms 后走联想接口；联想失败静默回落整词搜索。
+  void _onQueryChanged(String query) {
     _query = query;
-    if (query.trim().isEmpty && widget.history.searches.isNotEmpty) {
-      setState(() {
-        _results = const [];
-        _loading = false;
-        _error = null;
-      });
+    _debounce?.cancel();
+    if (query.trim().isEmpty) {
+      _requestSeq++; // 作废在途请求
+      if (widget.history.searches.isNotEmpty) {
+        setState(() {
+          _results = const [];
+          _loading = false;
+          _error = null;
+        });
+        return;
+      }
+      unawaited(_runSearch('', useTips: false));
       return;
     }
     setState(() {
       _loading = true;
       _error = null;
     });
+    _debounce = Timer(
+      const Duration(milliseconds: 300),
+      () => unawaited(_runSearch(query, useTips: true)),
+    );
+  }
+
+  /// 提交（回车）：立即走整词搜索，并把首条结果记入历史。
+  Future<void> _onSubmitted(String query) async {
+    _debounce?.cancel();
+    if (query.trim().isEmpty) return;
+    await _runSearch(query, useTips: false);
+    if (_results.isNotEmpty) {
+      await widget.history.addSearch(_results.first, query);
+    }
+  }
+
+  Future<void> _runSearch(String query, {required bool useTips}) async {
+    final provider = widget.settings.provider;
+    final seq = ++_requestSeq;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    final service = widget.services.serviceFor(provider);
     try {
-      final results = await widget.services
-          .serviceFor(provider)
-          .searchSuggestions(query, provider);
-      if (mounted) {
-        setState(() {
-          _results = results;
-          _loading = false;
-        });
+      List<Poi> results;
+      if (useTips) {
+        try {
+          results = await service.inputTips(query, provider);
+        } catch (_) {
+          // 联想接口失败/无 Key → 静默回落整词搜索，不打断输入。
+          results = await service.searchSuggestions(query, provider);
+        }
+      } else {
+        results = await service.searchSuggestions(query, provider);
       }
+      if (!mounted || seq != _requestSeq) return;
+      setState(() {
+        _results = results;
+        _loading = false;
+      });
     } on MapApiException catch (e) {
-      if (mounted) {
-        setState(() {
-          _results = const [];
-          _error = e.message;
-          _loading = false;
-        });
-      }
+      if (!mounted || seq != _requestSeq) return;
+      setState(() {
+        _results = const [];
+        _error = e.message;
+        _loading = false;
+      });
     } catch (_) {
-      if (mounted) {
-        setState(() {
-          _results = const [];
-          _error = '搜索失败，请稍后重试';
-          _loading = false;
-        });
-      }
+      if (!mounted || seq != _requestSeq) return;
+      setState(() {
+        _results = const [];
+        _error = '搜索失败，请稍后重试';
+        _loading = false;
+      });
     }
   }
 
@@ -154,6 +194,7 @@ class _SearchScreenState extends State<SearchScreen> {
             border: InputBorder.none,
           ),
           onChanged: _onQueryChanged,
+          onSubmitted: _onSubmitted,
         ),
         actions: [
           TextButton(

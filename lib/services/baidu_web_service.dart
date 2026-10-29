@@ -33,6 +33,39 @@ Map<String, dynamic> _ensureBaiduOk(Map<String, dynamic> json) {
   return result is Map<String, dynamic> ? result : const {};
 }
 
+/// 解析百度地点输入提示（place/v2/suggestion）响应（纯函数，供单测）。
+/// result 为数组；location 是 BD-09 坐标，转 GCJ-02 与 App 统一。
+List<Poi> parseBaiduSuggestionJson(Map<String, dynamic> json) {
+  _ensureBaiduOk(json);
+  final result = json['result'];
+  if (result is! List) return const [];
+  final pois = <Poi>[];
+  for (final raw in result.whereType<Map<String, dynamic>>()) {
+    final name = raw['name']?.toString() ?? '';
+    if (name.isEmpty) continue;
+    final city = raw['city']?.toString() ?? '';
+    final district = raw['district']?.toString() ?? '';
+    final uid = raw['uid']?.toString() ?? '';
+    GeoPoint? location;
+    final loc = raw['location'];
+    if (loc is Map<String, dynamic>) {
+      final lat = (loc['lat'] as num?)?.toDouble();
+      final lng = (loc['lng'] as num?)?.toDouble();
+      if (lat != null && lng != null) {
+        location = bd09ToGcj02(GeoPoint(latitude: lat, longitude: lng));
+      }
+    }
+    pois.add(Poi(
+      id: uid.isEmpty ? 'baidu-tip-$name' : uid,
+      name: name,
+      address: '$city$district',
+      category: raw['tag']?.toString() ?? '',
+      location: location,
+    ));
+  }
+  return pois;
+}
+
 /// 解析百度地点搜索响应（纯函数，供 fixture 单测）。
 /// 注意：百度返回 BD-09 坐标，这里统一转 GCJ-02 再进 UI 层。
 List<Poi> parseBaiduSearchJson(Map<String, dynamic> json) {
@@ -200,6 +233,20 @@ class BaiduWebService implements MapDataService {
       providerName: _providerName,
     );
     return parseBaiduSearchJson(json);
+  }
+
+  @override
+  Future<List<Poi>> inputTips(String query, MapProvider provider) async {
+    if (query.trim().isEmpty) return const [];
+    final json = await _api.getJson(
+      _uri('/place/v2/suggestion', {
+        'query': query.trim(),
+        'region': '全国',
+        'city_limit': 'false',
+      }),
+      providerName: _providerName,
+    );
+    return parseBaiduSuggestionJson(json);
   }
 
   @override

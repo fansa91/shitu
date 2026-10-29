@@ -125,6 +125,14 @@ class SampleMapDataService implements MapDataService {
       null; // 示例模式不查城市，公交走示例路线不需要城市参数
 
   @override
+  Future<List<Poi>> inputTips(String query, MapProvider provider) =>
+      searchSuggestions(query, provider);
+
+  @override
+  Future<List<Poi>> inputTips(String query, MapProvider provider) =>
+      searchSuggestions(query, provider);
+
+  @override
   Future<RoutePlan> planRoute({
     required Poi origin,
     required Poi destination,

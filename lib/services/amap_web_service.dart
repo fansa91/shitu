@@ -281,6 +281,19 @@ class AmapWebService implements MapDataService {
   }
 
   @override
+  Future<List<Poi>> inputTips(String query, MapProvider provider) async {
+    if (query.trim().isEmpty) return const [];
+    final json = await _api.getJson(
+      _uri('/v3/assistant/inputtips', {
+        'keywords': query.trim(),
+        'datatype': 'all',
+      }),
+      providerName: _providerName,
+    );
+    return parseAmapInputTipsJson(json);
+  }
+
+  @override
   Future<String?> reverseGeocode(GeoPoint point, MapProvider provider) async {
     try {
       final json = await _api.getJson(
