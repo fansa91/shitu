@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:shitu/main.dart';
+import 'package:shitu/services/history_service.dart';
 import 'package:shitu/services/places_service.dart';
 import 'package:shitu/services/settings_service.dart';
 import 'package:shitu/services/track_service.dart';
@@ -18,9 +19,15 @@ void main() {
     await places.load();
     final tracks = TrackService();
     await tracks.load();
+    final history = HistoryService();
+    await history.load();
 
-    await tester.pumpWidget(
-        ShituApp(settings: settings, places: places, tracks: tracks));
+    await tester.pumpWidget(ShituApp(
+      settings: settings,
+      places: places,
+      tracks: tracks,
+      history: history,
+    ));
     await tester.pump();
 
     // 悬浮搜索栏

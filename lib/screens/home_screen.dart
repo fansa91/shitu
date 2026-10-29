@@ -3,12 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../models/geo_point.dart';
+import '../models/history_entry.dart';
 import '../models/map_provider.dart';
 import '../models/offline_route.dart';
 import '../models/poi.dart';
 import '../services/amap_sdk_service.dart';
+import '../services/history_service.dart';
 import '../services/location_service.dart';
-import '../services/map_data_service.dart';
 import '../services/map_data_services.dart';
 import '../services/places_service.dart';
 import '../services/settings_service.dart';
@@ -32,12 +33,14 @@ class HomeScreen extends StatefulWidget {
     required this.services,
     required this.places,
     required this.tracks,
+    required this.history,
   });
 
   final SettingsService settings;
   final MapDataServices services;
   final PlacesService places;
   final TrackService tracks;
+  final HistoryService history;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -68,6 +71,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _places.addListener(_onPlacesChanged);
+    widget.history.addListener(_onPlacesChanged);
     WidgetsBinding.instance
         .addPostFrameCallback((_) => _initAmapWithPrivacy());
   }
@@ -122,6 +126,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _places.removeListener(_onPlacesChanged);
+    widget.history.removeListener(_onPlacesChanged);
     _followSub?.cancel();
     _sheetController.dispose();
     super.dispose();
@@ -245,6 +250,7 @@ class _HomeScreenState extends State<HomeScreen> {
         builder: (_) => SearchScreen(
           settings: _settings,
           services: widget.services,
+          history: widget.history,
         ),
       ),
     );
@@ -266,6 +272,7 @@ class _HomeScreenState extends State<HomeScreen> {
           services: widget.services,
           places: _places,
           tracks: widget.tracks,
+          history: widget.history,
           initialOrigin: initialOrigin,
         ),
       ),
@@ -714,9 +721,28 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// 点最近路线：带起终点重开路线页（坐标缺失的起点回落 GPS 流程）。
+  void _openRouteHistory(RouteHistoryEntry entry) {
+    final dest = Poi(
+      id: 'history-dest-${entry.atMs}',
+      name: entry.destinationName,
+      address: '',
+      category: '历史路线',
+      location: entry.destinationPoint,
+    );
+    final origin = entry.originPoint == null
+        ? null
+        : Poi(
+            id: 'history-origin-${entry.atMs}',
+            name: entry.originName,
+            address: '',
+            category: '历史路线',
+            location: entry.originPoint,
+          );
+    _openRoute(dest, initialOrigin: origin);
+  }
+
   Widget _homeSheetContent(BuildContext context, ScrollController? controller) {
-    // 示例数据（sample data）：原型占位地名，非真实记录。
-    const recents = SampleMapDataService.samplePois;
     Widget shortcut(
       IconData icon,
       String label,
@@ -794,17 +820,65 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
         ),
         const SizedBox(height: 10),
-        Text('最近', style: Theme.of(context).textTheme.titleSmall),
-        for (final poi in recents.take(3))
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.history),
-            title: Text(poi.name),
-            subtitle: Text(poi.distanceMeters == null
-                ? poi.address
-                : '${poi.address} · ${formatDistance(poi.distanceMeters!)}'),
-            onTap: () => setState(() => _selectedPoi = poi),
+        if (widget.history.searches.isEmpty && widget.history.routes.isEmpty)
+          Text(
+            '暂无历史记录，搜索与算路后会出现在这里',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
           ),
+        if (widget.history.searches.isNotEmpty) ...[
+          _historyHeader(context, '最近搜索', widget.history.clearSearches),
+          for (final entry in widget.history.searches.take(5))
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.history),
+              title: Text(entry.poi.name),
+              subtitle: Text(
+                entry.poi.distanceMeters == null
+                    ? entry.poi.address
+                    : '${entry.poi.address} · '
+                        '${formatDistance(entry.poi.distanceMeters!)}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              onTap: () => _selectPoi(entry.poi),
+            ),
+        ],
+        if (widget.history.routes.isNotEmpty) ...[
+          _historyHeader(context, '最近路线', widget.history.clearRoutes),
+          for (final entry in widget.history.routes.take(5))
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.route_outlined),
+              title: Text(
+                '${entry.originName} → ${entry.destinationName}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: Text(
+                  '${entry.mode.displayName} · ${entry.provider.displayName}'),
+              onTap: () => _openRouteHistory(entry),
+            ),
+        ],
+      ],
+    );
+  }
+
+  Widget _historyHeader(
+    BuildContext context,
+    String title,
+    Future<void> Function() onClear,
+  ) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(title, style: Theme.of(context).textTheme.titleSmall),
+        ),
+        TextButton(
+          onPressed: onClear,
+          child: const Text('清空'),
+        ),
       ],
     );
   }

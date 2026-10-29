@@ -6,6 +6,7 @@ import '../models/offline_route.dart';
 import '../models/poi.dart';
 import '../models/route_plan.dart';
 import '../services/api_exception.dart';
+import '../services/history_service.dart';
 import '../services/location_service.dart';
 import '../services/map_data_services.dart';
 import '../services/places_service.dart';
@@ -28,6 +29,7 @@ class RouteScreen extends StatefulWidget {
     required this.services,
     required this.places,
     required this.tracks,
+    required this.history,
     this.initialOrigin,
   });
 
@@ -36,6 +38,7 @@ class RouteScreen extends StatefulWidget {
   final MapDataServices services;
   final PlacesService places;
   final TrackService tracks;
+  final HistoryService history;
 
   /// 从历史路线进入时带入的起点；为 null 时默认 GPS 起点流程。
   final Poi? initialOrigin;
@@ -190,6 +193,15 @@ class _RouteScreenState extends State<RouteScreen> {
     final future = _loadPlan();
     _planFuture = future;
     future.then((plan) {
+      // 算路成功记一条路线历史（去重滚动，见 HistoryService）。
+      widget.history.addRoute(
+        originName: _originPoi.name,
+        destinationName: _destPoi.name,
+        mode: _mode,
+        provider: _routeProvider,
+        originPoint: _originPoi.location,
+        destinationPoint: _destPoi.location,
+      );
       if (mounted) {
         setState(() {
           _plan = plan;

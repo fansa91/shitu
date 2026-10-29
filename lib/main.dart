@@ -2,6 +2,7 @@ import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 
 import 'screens/home_screen.dart';
+import 'services/history_service.dart';
 import 'services/map_data_services.dart';
 import 'services/places_service.dart';
 import 'services/settings_service.dart';
@@ -16,7 +17,14 @@ Future<void> main() async {
   await places.load();
   final tracks = TrackService();
   await tracks.load();
-  runApp(ShituApp(settings: settings, places: places, tracks: tracks));
+  final history = HistoryService();
+  await history.load();
+  runApp(ShituApp(
+    settings: settings,
+    places: places,
+    tracks: tracks,
+    history: history,
+  ));
 }
 
 class ShituApp extends StatelessWidget {
@@ -25,11 +33,13 @@ class ShituApp extends StatelessWidget {
     required this.settings,
     required this.places,
     required this.tracks,
+    required this.history,
   });
 
   final SettingsService settings;
   final PlacesService places;
   final TrackService tracks;
+  final HistoryService history;
 
   @override
   Widget build(BuildContext context) {
@@ -58,6 +68,7 @@ class ShituApp extends StatelessWidget {
                 services: MapDataServices(settings),
                 places: places,
                 tracks: tracks,
+                history: history,
               ),
             );
           },
