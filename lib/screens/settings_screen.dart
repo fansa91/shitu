@@ -20,8 +20,9 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  /// 申请指南里的占位 SHA1，发布前替换为真实发布签名指纹。
-  static const _placeholderSha1 = 'AA:BB:CC:…（占位，发布前替换）';
+  /// 固定发布 keystore 的证书 SHA1 指纹（公开值，非密码）：与仓库 Secrets
+  /// 中 ANDROID_KEYSTORE_BASE64 对应的那把钥匙一致，换钥匙时同步更新这里。
+  static const _releaseSha1 = '60:15:40:F1:35:0A:61:37:F5:3E:6E:1C:C6:A3:1F:92:55:DA:F8:5D';
   static const _packageName = 'com.shitu.app';
 
   final Map<MapProvider, TextEditingController> _keyControllers = {};
@@ -214,7 +215,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ),
                     _copyRow('包名 / Bundle ID', _packageName),
-                    _copyRow('发布 SHA1（占位）', _placeholderSha1),
+                    _copyRow('发布 SHA1', _releaseSha1),
                   ],
                 ),
               ),
