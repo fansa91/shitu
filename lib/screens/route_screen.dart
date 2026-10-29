@@ -10,6 +10,7 @@ import '../services/location_service.dart';
 import '../services/map_data_services.dart';
 import '../services/places_service.dart';
 import '../services/settings_service.dart';
+import '../services/track_service.dart';
 import '../utils/format.dart';
 import '../widgets/app_map.dart';
 import 'navigation_screen.dart';
@@ -26,12 +27,18 @@ class RouteScreen extends StatefulWidget {
     required this.settings,
     required this.services,
     required this.places,
+    required this.tracks,
+    this.initialOrigin,
   });
 
   final Poi destination;
   final SettingsService settings;
   final MapDataServices services;
   final PlacesService places;
+  final TrackService tracks;
+
+  /// 从历史路线进入时带入的起点；为 null 时默认 GPS 起点流程。
+  final Poi? initialOrigin;
 
   @override
   State<RouteScreen> createState() => _RouteScreenState();
@@ -68,7 +75,15 @@ class _RouteScreenState extends State<RouteScreen> {
   @override
   void initState() {
     super.initState();
-    _initGpsOrigin();
+    final initial = widget.initialOrigin;
+    if (initial != null && initial.location != null) {
+      _originPoi = initial;
+      _originUseText = false;
+      _gpsBusy = false;
+      _reload();
+    } else {
+      _initGpsOrigin();
+    }
   }
 
   @override
@@ -241,8 +256,14 @@ class _RouteScreenState extends State<RouteScreen> {
       MaterialPageRoute(
         builder: (_) => NavigationScreen(
           option: option,
+          originName: _originPoi.name,
           destinationName: _destPoi.name,
+          destination: _destPoi,
+          mode: _mode,
+          provider: _routeProvider,
           settings: widget.settings,
+          services: widget.services,
+          tracks: widget.tracks,
           simulated: simulated,
         ),
       ),

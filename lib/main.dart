@@ -5,6 +5,7 @@ import 'screens/home_screen.dart';
 import 'services/map_data_services.dart';
 import 'services/places_service.dart';
 import 'services/settings_service.dart';
+import 'services/track_service.dart';
 import 'theme/appearance.dart';
 
 Future<void> main() async {
@@ -13,14 +14,22 @@ Future<void> main() async {
   await settings.load();
   final places = PlacesService();
   await places.load();
-  runApp(ShituApp(settings: settings, places: places));
+  final tracks = TrackService();
+  await tracks.load();
+  runApp(ShituApp(settings: settings, places: places, tracks: tracks));
 }
 
 class ShituApp extends StatelessWidget {
-  const ShituApp({super.key, required this.settings, required this.places});
+  const ShituApp({
+    super.key,
+    required this.settings,
+    required this.places,
+    required this.tracks,
+  });
 
   final SettingsService settings;
   final PlacesService places;
+  final TrackService tracks;
 
   @override
   Widget build(BuildContext context) {
@@ -48,6 +57,7 @@ class ShituApp extends StatelessWidget {
                 settings: settings,
                 services: MapDataServices(settings),
                 places: places,
+                tracks: tracks,
               ),
             );
           },

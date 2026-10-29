@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shitu/main.dart';
 import 'package:shitu/services/places_service.dart';
 import 'package:shitu/services/settings_service.dart';
+import 'package:shitu/services/track_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -15,8 +16,11 @@ void main() {
     await settings.load();
     final places = PlacesService();
     await places.load();
+    final tracks = TrackService();
+    await tracks.load();
 
-    await tester.pumpWidget(ShituApp(settings: settings, places: places));
+    await tester.pumpWidget(
+        ShituApp(settings: settings, places: places, tracks: tracks));
     await tester.pump();
 
     // 悬浮搜索栏

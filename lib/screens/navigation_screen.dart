@@ -1,24 +1,51 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 
+import '../models/located_fix.dart';
 import '../models/map_provider.dart';
+import '../models/poi.dart';
 import '../models/route_plan.dart';
+import '../services/location_service.dart';
+import '../services/map_data_services.dart';
+import '../services/navigation_controller.dart';
 import '../services/settings_service.dart';
+import '../services/track_service.dart';
+import '../services/tts_service.dart';
 import '../utils/format.dart';
-import '../widgets/fake_map.dart';
+import '../utils/nav_geometry.dart';
+import '../widgets/app_map.dart';
 
-/// 导航页：深色沉浸式。顶部指引横幅、拥堵提示条、速度气泡、底部信息条。
+/// 导航页：深色沉浸式。接 [NavigationController] 的真实状态：
+/// 顶部指引横幅（下一步转向 + 距离 + 文案）、速度气泡（GPS 实测速度，
+/// 不显示假限速）、偏航重规划条、底部 ETA 条、到达/结束行程小结。
 class NavigationScreen extends StatefulWidget {
   const NavigationScreen({
     super.key,
     required this.option,
+    required this.originName,
     required this.destinationName,
+    required this.destination,
+    required this.mode,
+    required this.provider,
     required this.settings,
+    required this.services,
+    required this.tracks,
     this.simulated = false,
   });
 
   final RouteOption option;
+  final String originName;
   final String destinationName;
+
+  /// 终点 Poi（偏航重规划的目标）。
+  final Poi destination;
+  final TransportMode mode;
+  final MapProvider provider;
   final SettingsService settings;
+  final MapDataServices services;
+  final TrackService tracks;
   final bool simulated;
 
   @override
@@ -26,21 +53,175 @@ class NavigationScreen extends StatefulWidget {
 }
 
 class _NavigationScreenState extends State<NavigationScreen> {
-  bool _showCongestionAlert = true;
+  final _locationService = LocationService();
+  late final TtsService _tts;
+  late final NavigationController _nav;
+  StreamSubscription<LocatedFix>? _fixSub;
+  Timer? _simTimer;
+  double _simAlong = 0;
+  bool _muted = false;
+  bool _summaryShown = false;
+
+  // 偏航重规划
+  bool _rerouting = false;
+  RouteOption? _rerouteCandidate;
 
   String get _voiceLabel => widget.settings.ttsEngine == TtsEngine.nvidia
       ? '语音 · 英伟达'
       : '语音 · 系统';
 
-  Future<void> _exit() async {
+  @override
+  void initState() {
+    super.initState();
+    _tts = createTtsService(
+      engine: widget.settings.ttsEngine,
+      nvidiaKey: widget.settings.nvidiaKey,
+      nvidiaVoice: widget.settings.nvidiaVoice,
+    );
+    _nav = NavigationController(
+      initialOption: widget.option,
+      originName: widget.originName,
+      destinationName: widget.destinationName,
+      onAnnounce: (text) {
+        if (!_muted) _tts.speak(text);
+      },
+    );
+    _nav.addListener(_onNavChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _begin());
+  }
+
+  Future<void> _begin() async {
+    // 英伟达引擎 + 预合成开：先探活预合成，不可用则全程系统语音（状态可查）。
+    final tts = _tts;
+    if (tts is NvidiaTtsService && widget.settings.ttsPresynthesize) {
+      await tts.presynthesize(widget.option.steps);
+    }
+    if (!mounted) return;
+    _nav.start();
+    if (widget.simulated) {
+      _startSimulation();
+      return;
+    }
+    try {
+      await _locationService.ensureReady();
+    } on LocationException catch (e) {
+      if (mounted) _snack(e.message);
+      return;
+    }
+    if (!mounted) return;
+    _fixSub = _locationService.followFixStream().listen(
+      _nav.updatePosition,
+      onError: (Object e) {
+        if (mounted && e is LocationException) _snack(e.message);
+      },
+    );
+  }
+
+  /// 模拟导航：沿折线以方案平均速度的 6 倍匀速推进，喂给同一个状态机。
+  void _startSimulation() {
+    final points = widget.option.points;
+    if (points.length < 2) return;
+    final cumulative = cumulativeDistances(points);
+    final avgSpeed = widget.option.durationSeconds > 0
+        ? widget.option.distanceMeters / widget.option.durationSeconds
+        : 8.33;
+    _simTimer = Timer.periodic(const Duration(milliseconds: 400), (_) {
+      _simAlong += avgSpeed * 6 * 0.4;
+      final point = pointAtDistance(points, cumulative, _simAlong);
+      _nav.updatePosition(LocatedFix(
+        point: point,
+        at: DateTime.now(),
+        speedMps: avgSpeed,
+      ));
+      if (_simAlong >= cumulative.last) _simTimer?.cancel();
+    });
+  }
+
+  void _onNavChanged() {
+    if (!mounted) return;
+    setState(() {});
+    if (_nav.arrived && !_summaryShown) {
+      _summaryShown = true;
+      _finishFlow();
+    }
+    if (_nav.rerouteSuggested &&
+        _rerouteCandidate == null &&
+        !_rerouting) {
+      _computeReroute();
+    }
+  }
+
+  Future<void> _computeReroute() async {
+    final current = _nav.currentPoint;
+    if (current == null) return;
+    _rerouting = true;
+    try {
+      final plan = await widget.services.serviceFor(widget.provider).planRoute(
+            origin: Poi(
+              id: 'gps-reroute',
+              name: '我的位置',
+              address: '',
+              category: '我的位置',
+              location: current,
+            ),
+            destination: widget.destination,
+            mode: widget.mode,
+            provider: widget.provider,
+          );
+      if (!mounted) return;
+      setState(() {
+        _rerouteCandidate =
+            plan.options.where((o) => o.recommended).firstOrNull ??
+                plan.options.firstOrNull;
+      });
+    } catch (_) {
+      // 重规划失败：当作忽略处理，进入冷却，避免反复弹。
+      _nav.ignoreReroute();
+      if (mounted) _snack('重新规划失败，请按原路线行驶或稍后重试');
+    } finally {
+      _rerouting = false;
+    }
+  }
+
+  void _acceptReroute() {
+    final candidate = _rerouteCandidate;
+    if (candidate == null) return;
+    setState(() => _rerouteCandidate = null);
+    _nav.replaceRoute(candidate);
+  }
+
+  void _ignoreReroute() {
+    setState(() => _rerouteCandidate = null);
+    _nav.ignoreReroute();
+  }
+
+  void _snack(String message) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  String _summaryText(NavSummary summary) {
+    return '识途行程：${widget.originName} → ${widget.destinationName}\n'
+        '实际里程 ${formatDistance(summary.distanceMeters)} · '
+        '用时 ${formatDuration(summary.durationSeconds)}'
+        '${summary.arrived ? ' · 已到达' : ''}';
+  }
+
+  Future<void> _finishFlow() async {
+    _fixSub?.cancel();
+    _simTimer?.cancel();
+    await _tts.stop();
+    final summary = _nav.finish();
+    if (!mounted) return;
     final action = await showDialog<String>(
       context: context,
+      barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: const Text('到达小结'),
+        title: Text(summary.arrived ? '已到达目的地' : '行程小结'),
         content: Text(
           '目的地：${widget.destinationName}\n'
-          '里程：${formatDistance(widget.option.distanceMeters)}\n'
-          '时长：${formatDuration(widget.option.durationSeconds)}'
+          '实际里程：${formatDistance(summary.distanceMeters)}\n'
+          '实际用时：${formatDuration(summary.durationSeconds)}'
           '${widget.simulated ? '\n（本次为模拟导航）' : ''}',
         ),
         actions: [
@@ -60,23 +241,95 @@ class _NavigationScreenState extends State<NavigationScreen> {
       ),
     );
     if (!mounted) return;
-    if (action == 'save' || action == 'share') {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(action == 'save' ? '轨迹已保存（骨架占位）' : '分享功能骨架占位')),
+    if (action == 'save') {
+      if (summary.trackPoints.length >= 2) {
+        await widget.tracks.save(_nav.buildTrack());
+        if (mounted) _snack('轨迹已保存，可在「收藏 / 轨迹」里回放');
+      } else {
+        _snack('轨迹点太少，未保存');
+      }
+    } else if (action == 'share') {
+      await SharePlus.instance.share(
+        ShareParams(text: _summaryText(summary)),
       );
     }
-    Navigator.of(context).pop();
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  Future<void> _confirmExit() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('结束导航？'),
+        content: const Text('将停止跟随与播报，并显示本次行程小结。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('继续导航'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('结束'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && mounted && !_summaryShown) {
+      _summaryShown = true;
+      _finishFlow();
+    }
+  }
+
+  void _showVoiceStatus() {
+    final tts = _tts;
+    if (tts is NvidiaTtsService && tts.lastFallbackReason != null) {
+      _snack('英伟达播报状态：${tts.lastFallbackReason}（当前实际使用系统语音）');
+    } else if (widget.settings.ttsEngine == TtsEngine.nvidia) {
+      _snack('当前播报引擎：英伟达 TTS（音色 ${widget.settings.nvidiaVoice}）');
+    } else {
+      _snack('当前播报引擎：系统语音');
+    }
+  }
+
+  IconData _turnIcon(TurnDirection? direction) {
+    return switch (direction) {
+      TurnDirection.left || TurnDirection.sharpLeft => Icons.turn_left,
+      TurnDirection.right || TurnDirection.sharpRight => Icons.turn_right,
+      TurnDirection.slightLeft => Icons.turn_slight_left,
+      TurnDirection.slightRight => Icons.turn_slight_right,
+      TurnDirection.uturn => Icons.u_turn_left,
+      null => Icons.arrow_upward,
+    };
+  }
+
+  @override
+  void dispose() {
+    _fixSub?.cancel();
+    _simTimer?.cancel();
+    _tts.stop();
+    _nav.removeListener(_onNavChanged);
+    _nav.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final eta = DateTime.now()
-        .add(Duration(seconds: widget.option.durationSeconds));
+    final next = _nav.nextManeuver;
+    final distToNext = _nav.distanceToNextManeuver;
+    final speed = _nav.currentSpeedKmh;
     return Scaffold(
       backgroundColor: const Color(0xFF101826),
       body: Stack(
         children: [
-          const Positioned.fill(child: FakeMap(dark: true, showRoute: true)),
+          Positioned.fill(
+            child: AppMap(
+              settings: widget.settings,
+              dark: true,
+              selectedRoutePoints: _nav.option.points,
+              myLocation: _nav.currentPoint,
+              showLocationDot: _nav.currentPoint == null,
+            ),
+          ),
           // 顶部指引横幅
           Positioned(
             left: 12,
@@ -92,36 +345,51 @@ class _NavigationScreenState extends State<NavigationScreen> {
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                 child: Row(
                   children: [
-                    const Icon(Icons.turn_right,
-                        color: Colors.white, size: 44),
+                    Icon(
+                      _nav.arrived
+                          ? Icons.flag
+                          : _turnIcon(next?.direction),
+                      color: Colors.white,
+                      size: 44,
+                    ),
                     const SizedBox(width: 14),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          '300 米',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 25,
-                            fontWeight: FontWeight.w700,
-                            height: 1,
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _nav.arrived
+                                ? '已到达'
+                                : distToNext != null
+                                    ? formatDistance(distToNext)
+                                    : formatDistance(_nav.remainingMeters),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 25,
+                              fontWeight: FontWeight.w700,
+                              height: 1,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          widget.simulated ? '模拟：右转 进入深南大道' : '右转 进入深南大道',
-                          style: const TextStyle(
-                              color: Color(0xFFC9ECDF), fontSize: 14),
-                        ),
-                      ],
+                          const SizedBox(height: 3),
+                          Text(
+                            _nav.arrived
+                                ? '已到达「${widget.destinationName}」附近'
+                                : next?.instruction ?? '继续直行',
+                            style: const TextStyle(
+                                color: Color(0xFFC9ECDF), fontSize: 14),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
               ),
             ),
           ),
-          // 拥堵重规划提示条
-          if (_showCongestionAlert)
+          // 偏航重规划条
+          if (_rerouteCandidate != null)
             Positioned(
               left: 12,
               right: 12,
@@ -134,28 +402,46 @@ class _NavigationScreenState extends State<NavigationScreen> {
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   child: Row(
                     children: [
-                      const Text(
-                        '前方 2 km 拥堵，已重新规划',
-                        style: TextStyle(fontSize: 12.5, color: Color(0xFF7A5B00)),
+                      Expanded(
+                        child: Text(
+                          '已偏离原路线，新路线 ${formatDuration(_rerouteCandidate!.durationSeconds)} · '
+                          '${formatDistance(_rerouteCandidate!.distanceMeters)}',
+                          style: const TextStyle(
+                              fontSize: 12.5, color: Color(0xFF7A5B00)),
+                        ),
                       ),
-                      const Spacer(),
                       TextButton(
-                        onPressed: () =>
-                            setState(() => _showCongestionAlert = false),
+                        onPressed: _acceptReroute,
                         child: const Text('接受'),
                       ),
                       IconButton(
                         icon: const Icon(Icons.close, size: 18),
-                        tooltip: '忽略',
-                        onPressed: () =>
-                            setState(() => _showCongestionAlert = false),
+                        tooltip: '忽略（60 秒内不再提示）',
+                        onPressed: _ignoreReroute,
                       ),
                     ],
                   ),
                 ),
               ),
+            )
+          else if (_rerouting)
+            Positioned(
+              left: 12,
+              right: 12,
+              top: 128,
+              child: Material(
+                color: const Color(0xFFFDF3D7),
+                borderRadius: BorderRadius.circular(13),
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  child: Text(
+                    '已偏离路线，正在重新规划…',
+                    style: TextStyle(fontSize: 12.5, color: Color(0xFF7A5B00)),
+                  ),
+                ),
+              ),
             ),
-          // 速度 / 限速气泡
+          // 速度气泡（GPS 实测；无速度时显示 --，不显示假限速）
           Positioned(
             left: 14,
             top: 250,
@@ -165,19 +451,21 @@ class _NavigationScreenState extends State<NavigationScreen> {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: Colors.white,
-                border: Border.all(color: const Color(0xFFE8453C), width: 3),
+                border: Border.all(color: const Color(0xFF3A4A61), width: 3),
               ),
-              child: const Column(
+              child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text('65',
-                      style: TextStyle(
-                          fontSize: 19,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF17233B),
-                          height: 1)),
-                  SizedBox(height: 2),
-                  Text('限速 60',
+                  Text(
+                    speed == null ? '--' : '${speed.round()}',
+                    style: const TextStyle(
+                        fontSize: 19,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF17233B),
+                        height: 1),
+                  ),
+                  const SizedBox(height: 2),
+                  const Text('km/h',
                       style: TextStyle(fontSize: 9.5, color: Colors.grey)),
                 ],
               ),
@@ -197,9 +485,9 @@ class _NavigationScreenState extends State<NavigationScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '剩余 ${formatDuration(widget.option.durationSeconds)} · '
-                      '${formatDistance(widget.option.distanceMeters)} · '
-                      '预计 ${formatClock(eta)} 到达 · 深南大道',
+                      '剩余 ${formatDuration(_nav.remainingSeconds)} · '
+                      '${formatDistance(_nav.remainingMeters)} · '
+                      '预计 ${formatClock(_nav.eta)} 到达',
                       style: const TextStyle(
                           color: Color(0xFFDBE6F2), fontSize: 13.5),
                     ),
@@ -207,21 +495,18 @@ class _NavigationScreenState extends State<NavigationScreen> {
                     Row(
                       children: [
                         Expanded(
-                          child: _navButton('总览', () {}),
+                          child: _navButton(_voiceLabel, _showVoiceStatus),
                         ),
                         const SizedBox(width: 8),
                         Expanded(
-                          child: _navButton(_voiceLabel, () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                  content: Text(
-                                      '当前播报引擎：$_voiceLabel（骨架占位）')),
-                            );
-                          }),
+                          child: _navButton(
+                            _muted ? '播报已关' : '播报开',
+                            () => setState(() => _muted = !_muted),
+                          ),
                         ),
                         const SizedBox(width: 8),
                         Expanded(
-                          child: _navButton('退出导航', _exit,
+                          child: _navButton('结束导航', _confirmExit,
                               background: const Color(0xFF5C2320),
                               foreground: const Color(0xFFFFB4AB)),
                         ),

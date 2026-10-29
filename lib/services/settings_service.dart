@@ -21,6 +21,7 @@ class SettingsService extends ChangeNotifier {
   static const _kAmapSdkAndroidKey = 'amap_sdk_android_key';
   static const _kAmapSdkIosKey = 'amap_sdk_ios_key';
   static const _kPrivacyAgreed = 'privacy_agreed';
+  static const _kNvidiaVoice = 'nvidia_voice';
   static const _kThemeMode = 'theme_mode';
   static const _kDynamicColor = 'dynamic_color_enabled';
   static const _kSeedColorValue = 'seed_color_value';
@@ -33,6 +34,7 @@ class SettingsService extends ChangeNotifier {
     for (final p in MapProvider.values) p: '',
   };
   String _nvidiaKey = '';
+  String _nvidiaVoice = 'Siwei';
   TtsEngine _ttsEngine = TtsEngine.system;
   bool _ttsPresynthesize = true;
   AppThemeMode _themeMode = AppThemeMode.system;
@@ -56,6 +58,9 @@ class SettingsService extends ChangeNotifier {
   bool get ttsPresynthesize => _ttsPresynthesize;
   String get nvidiaKey => _nvidiaKey;
 
+  /// 英伟达音色短名（见 tts_service.nvidiaVoiceNames），默认 Siwei。
+  String get nvidiaVoice => _nvidiaVoice;
+
   /// 外观：主题模式 / 是否跟随系统动态取色 / 自定义种子色。
   AppThemeMode get themeMode => _themeMode;
   bool get dynamicColorEnabled => _dynamicColorEnabled;
@@ -75,6 +80,7 @@ class SettingsService extends ChangeNotifier {
     _keys[MapProvider.baidu] = prefs.getString(_kKeyBaidu) ?? '';
     _keys[MapProvider.tencent] = prefs.getString(_kKeyTencent) ?? '';
     _nvidiaKey = prefs.getString(_kKeyNvidia) ?? '';
+    _nvidiaVoice = prefs.getString(_kNvidiaVoice) ?? 'Siwei';
     _ttsEngine = _ttsFromName(prefs.getString(_kTtsEngine));
     _ttsPresynthesize = prefs.getBool(_kTtsPresynthesize) ?? true;
     _amapSdkAndroidKey = prefs.getString(_kAmapSdkAndroidKey) ?? '';
@@ -117,6 +123,13 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_storageKeyFor(provider), value.trim());
+  }
+
+  Future<void> setNvidiaVoice(String value) async {
+    _nvidiaVoice = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kNvidiaVoice, value);
   }
 
   Future<void> setNvidiaKey(String value) async {

@@ -12,6 +12,7 @@ import '../services/map_data_service.dart';
 import '../services/map_data_services.dart';
 import '../services/places_service.dart';
 import '../services/settings_service.dart';
+import '../services/track_service.dart';
 import '../utils/format.dart';
 import '../widgets/app_map.dart';
 import '../widgets/poi_detail_panel.dart';
@@ -30,11 +31,13 @@ class HomeScreen extends StatefulWidget {
     required this.settings,
     required this.services,
     required this.places,
+    required this.tracks,
   });
 
   final SettingsService settings;
   final MapDataServices services;
   final PlacesService places;
+  final TrackService tracks;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -242,7 +245,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _openRoute(Poi poi) {
+  void _openRoute(Poi poi, {Poi? initialOrigin}) {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => RouteScreen(
@@ -250,6 +253,8 @@ class _HomeScreenState extends State<HomeScreen> {
           settings: _settings,
           services: widget.services,
           places: _places,
+          tracks: widget.tracks,
+          initialOrigin: initialOrigin,
         ),
       ),
     );

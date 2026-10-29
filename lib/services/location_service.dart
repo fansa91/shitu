@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:geolocator/geolocator.dart';
 
 import '../models/geo_point.dart';
+import '../models/located_fix.dart';
 import '../utils/coord.dart';
 
 /// 定位失败类型，UI 据此给出不同的中文引导（开服务 / 授权 / 去设置）。
@@ -161,6 +162,28 @@ class LocationService {
   /// 保证权限流程已走完；流内错误会以 [LocationException] 形式透出。
   Stream<GeoPoint> followStream() {
     return _positionStream().map(_toGcj02).handleError((Object e) {
+      if (e is TimeoutException) {
+        throw const LocationException(
+          LocationErrorKind.timeout,
+          '定位超时：GPS 信号弱',
+        );
+      }
+      throw const LocationException(
+        LocationErrorKind.unknown,
+        '定位中断，请重试',
+      );
+    });
+  }
+
+  LocatedFix _toFix(Position p) => LocatedFix(
+        point: _toGcj02(p),
+        at: p.timestamp,
+        speedMps: p.speed >= 0 ? p.speed : null,
+      );
+
+  /// 带速度与时刻的持续定位流（导航跟随 / 轨迹记录用）。
+  Stream<LocatedFix> followFixStream() {
+    return _positionStream().map(_toFix).handleError((Object e) {
       if (e is TimeoutException) {
         throw const LocationException(
           LocationErrorKind.timeout,
