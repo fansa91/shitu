@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../models/map_provider.dart';
+import '../theme/appearance.dart';
 import '../utils/external_link.dart';
 import '../utils/format.dart';
 import '../services/api_exception.dart';
@@ -173,6 +174,57 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
               ),
+              _sectionTitle('外观'),
+              Card(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+                      child: Text('主题模式',
+                          style: Theme.of(context).textTheme.titleSmall),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                      child: SegmentedButton<AppThemeMode>(
+                        segments: [
+                          for (final m in AppThemeMode.values)
+                            ButtonSegment<AppThemeMode>(
+                              value: m,
+                              label: Text(m.label),
+                            ),
+                        ],
+                        selected: {_settings.themeMode},
+                        onSelectionChanged: (s) =>
+                            _settings.setThemeMode(s.first),
+                      ),
+                    ),
+                    SwitchListTile(
+                      title: const Text('动态取色'),
+                      subtitle: const Text(
+                          '跟随系统壁纸配色（Android 12+）；系统无动态配色时使用下方主题色'),
+                      value: _settings.dynamicColorEnabled,
+                      onChanged: _settings.setDynamicColorEnabled,
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 2),
+                      child: Text('主题色',
+                          style: Theme.of(context).textTheme.titleSmall),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 2, 16, 14),
+                      child: Wrap(
+                        spacing: 12,
+                        runSpacing: 10,
+                        children: [
+                          for (final opt in seedOptions)
+                            _seedSwatch(opt),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               _sectionTitle('API Key 管理（用户自填）'),
               for (final p in MapProvider.values)
                 _keyCard(
@@ -261,6 +313,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         );
       },
+    );
+  }
+
+  /// 主题色圆形色板：选中态为对勾 + 主色描边，点击即存即生效。
+  Widget _seedSwatch(SeedOption opt) {
+    final selected = _settings.seedColorValue == opt.color.toARGB32();
+    final scheme = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: opt.name,
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: () => _settings.setSeedColor(opt.color),
+        child: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: opt.color,
+            border: Border.all(
+              color: selected ? scheme.primary : scheme.outlineVariant,
+              width: selected ? 3 : 1,
+            ),
+          ),
+          child: selected
+              ? const Icon(Icons.check, color: Colors.white, size: 20)
+              : null,
+        ),
+      ),
     );
   }
 

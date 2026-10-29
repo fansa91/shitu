@@ -5,9 +5,7 @@ import 'screens/home_screen.dart';
 import 'services/map_data_services.dart';
 import 'services/places_service.dart';
 import 'services/settings_service.dart';
-
-/// 识途品牌主色（地图蓝），无动态取色时回落使用。
-const _brandSeed = Color(0xFF1A73E8);
+import 'theme/appearance.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -26,25 +24,33 @@ class ShituApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DynamicColorBuilder(
-      builder: (lightDynamic, darkDynamic) {
-        final lightScheme = lightDynamic ??
-            ColorScheme.fromSeed(seedColor: _brandSeed);
-        final darkScheme = darkDynamic ??
-            ColorScheme.fromSeed(
-              seedColor: _brandSeed,
-              brightness: Brightness.dark,
+    return ListenableBuilder(
+      listenable: settings,
+      builder: (context, _) {
+        return DynamicColorBuilder(
+          builder: (lightDynamic, darkDynamic) {
+            final useDynamic = settings.dynamicColorEnabled;
+            final lightScheme = (useDynamic ? lightDynamic : null) ??
+                ColorScheme.fromSeed(seedColor: settings.seedColor);
+            final darkScheme = (useDynamic ? darkDynamic : null) ??
+                ColorScheme.fromSeed(
+                  seedColor: settings.seedColor,
+                  brightness: Brightness.dark,
+                );
+            return MaterialApp(
+              title: '识途',
+              debugShowCheckedModeBanner: false,
+              theme: ThemeData(colorScheme: lightScheme, useMaterial3: true),
+              darkTheme:
+                  ThemeData(colorScheme: darkScheme, useMaterial3: true),
+              themeMode: settings.themeMode.materialMode,
+              home: HomeScreen(
+                settings: settings,
+                services: MapDataServices(settings),
+                places: places,
+              ),
             );
-        return MaterialApp(
-          title: '识途',
-          debugShowCheckedModeBanner: false,
-          theme: ThemeData(colorScheme: lightScheme, useMaterial3: true),
-          darkTheme: ThemeData(colorScheme: darkScheme, useMaterial3: true),
-          home: HomeScreen(
-            settings: settings,
-            services: MapDataServices(settings),
-            places: places,
-          ),
+          },
         );
       },
     );

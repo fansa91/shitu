@@ -1,8 +1,11 @@
+import 'dart:ui' show Color;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:shitu/models/map_provider.dart';
 import 'package:shitu/services/settings_service.dart';
+import 'package:shitu/theme/appearance.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -42,5 +45,25 @@ void main() {
     expect(reloaded.provider, MapProvider.tencent);
     expect(reloaded.ttsEngine, TtsEngine.nvidia);
     expect(reloaded.ttsPresynthesize, isFalse);
+  });
+
+  test('外观偏好：默认值与存取往返', () async {
+    final service = SettingsService();
+    await service.load();
+    // 默认：跟随系统 + 动态取色开 + 品牌蓝种子色。
+    expect(service.themeMode, AppThemeMode.system);
+    expect(service.dynamicColorEnabled, isTrue);
+    expect(service.seedColor, brandSeedColor);
+
+    await service.setThemeMode(AppThemeMode.dark);
+    await service.setDynamicColorEnabled(false);
+    await service.setSeedColor(const Color(0xFFC62828));
+
+    final reloaded = SettingsService();
+    await reloaded.load();
+    expect(reloaded.themeMode, AppThemeMode.dark);
+    expect(reloaded.dynamicColorEnabled, isFalse);
+    expect(reloaded.seedColor, const Color(0xFFC62828));
+    expect(reloaded.seedColorValue, 0xFFC62828);
   });
 }

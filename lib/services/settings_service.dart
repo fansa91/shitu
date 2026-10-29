@@ -1,7 +1,10 @@
+import 'dart:ui' show Color;
+
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/map_provider.dart';
+import '../theme/appearance.dart';
 
 /// 应用设置：三家服务商 Key、当前服务商、TTS 偏好。
 ///
@@ -18,6 +21,9 @@ class SettingsService extends ChangeNotifier {
   static const _kAmapSdkAndroidKey = 'amap_sdk_android_key';
   static const _kAmapSdkIosKey = 'amap_sdk_ios_key';
   static const _kPrivacyAgreed = 'privacy_agreed';
+  static const _kThemeMode = 'theme_mode';
+  static const _kDynamicColor = 'dynamic_color_enabled';
+  static const _kSeedColorValue = 'seed_color_value';
 
   MapProvider _provider = MapProvider.amap;
   String _amapSdkAndroidKey = '';
@@ -29,6 +35,9 @@ class SettingsService extends ChangeNotifier {
   String _nvidiaKey = '';
   TtsEngine _ttsEngine = TtsEngine.system;
   bool _ttsPresynthesize = true;
+  AppThemeMode _themeMode = AppThemeMode.system;
+  bool _dynamicColorEnabled = true;
+  int _seedColorValue = 0xFF1A73E8; // brandSeedColor 的 ARGB
 
   MapProvider get provider => _provider;
 
@@ -46,6 +55,12 @@ class SettingsService extends ChangeNotifier {
   TtsEngine get ttsEngine => _ttsEngine;
   bool get ttsPresynthesize => _ttsPresynthesize;
   String get nvidiaKey => _nvidiaKey;
+
+  /// 外观：主题模式 / 是否跟随系统动态取色 / 自定义种子色。
+  AppThemeMode get themeMode => _themeMode;
+  bool get dynamicColorEnabled => _dynamicColorEnabled;
+  Color get seedColor => Color(_seedColorValue);
+  int get seedColorValue => _seedColorValue;
 
   String keyFor(MapProvider provider) => _keys[provider] ?? '';
   bool hasKeyFor(MapProvider provider) => keyFor(provider).trim().isNotEmpty;
@@ -65,6 +80,9 @@ class SettingsService extends ChangeNotifier {
     _amapSdkAndroidKey = prefs.getString(_kAmapSdkAndroidKey) ?? '';
     _amapSdkIosKey = prefs.getString(_kAmapSdkIosKey) ?? '';
     _privacyAgreed = prefs.getBool(_kPrivacyAgreed) ?? false;
+    _themeMode = _themeModeFromName(prefs.getString(_kThemeMode));
+    _dynamicColorEnabled = prefs.getBool(_kDynamicColor) ?? true;
+    _seedColorValue = prefs.getInt(_kSeedColorValue) ?? _seedColorValue;
     notifyListeners();
   }
 
@@ -122,6 +140,27 @@ class SettingsService extends ChangeNotifier {
     await prefs.setBool(_kTtsPresynthesize, value);
   }
 
+  Future<void> setThemeMode(AppThemeMode value) async {
+    _themeMode = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kThemeMode, value.name);
+  }
+
+  Future<void> setDynamicColorEnabled(bool value) async {
+    _dynamicColorEnabled = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kDynamicColor, value);
+  }
+
+  Future<void> setSeedColor(Color value) async {
+    _seedColorValue = value.toARGB32();
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_kSeedColorValue, _seedColorValue);
+  }
+
   String _storageKeyFor(MapProvider provider) => switch (provider) {
         MapProvider.amap => _kKeyAmap,
         MapProvider.baidu => _kKeyBaidu,
@@ -135,4 +174,8 @@ class SettingsService extends ChangeNotifier {
   TtsEngine _ttsFromName(String? name) =>
       TtsEngine.values.where((e) => e.name == name).firstOrNull ??
       TtsEngine.system;
+
+  AppThemeMode _themeModeFromName(String? name) =>
+      AppThemeMode.values.where((e) => e.name == name).firstOrNull ??
+      AppThemeMode.system;
 }
