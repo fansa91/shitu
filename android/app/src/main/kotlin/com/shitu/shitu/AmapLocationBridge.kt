@@ -77,12 +77,14 @@ class AmapLocationBridge(messenger: BinaryMessenger, private val appContext: Con
         try {
             AMapLocationClient.updatePrivacyShow(appContext, true, true)
             AMapLocationClient.updatePrivacyAgree(appContext, true)
+            // setApiKey 是 AMapLocationClient 的静态方法（6.5.1），
+            // 不能经实例调用，且应在构造 client 之前设置。
+            AMapLocationClient.setApiKey(apiKey)
             if (client == null) {
                 val created = AMapLocationClient(appContext)
                 created.setLocationListener(listener)
                 client = created
             }
-            client?.setApiKey(apiKey)
             result.success(true)
         } catch (e: Exception) {
             result.error("AMAP_INIT", e.message ?: "高德定位初始化失败", null)
