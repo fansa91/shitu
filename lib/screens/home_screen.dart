@@ -159,9 +159,14 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// 实时路况：切换高德路况瓦片 overlay 图层（端点已实测可用，
-  /// 见 services/map_tiles.dart）；无路况数据的区域该图层为空。
+  /// 实时路况：切换路况瓦片 overlay 图层（跟随底图源，端点实测见
+  /// services/map_tiles.dart）；无路况数据的区域该图层为空。
+  /// 腾讯源无实测可用的路况瓦片：开关置灰，只提示、不切换。
   void _toggleTraffic() {
+    if (!_settings.mapTileSource.supportsTraffic) {
+      _snack('腾讯底图暂不支持路况图层（无实测可用的路况瓦片）');
+      return;
+    }
     setState(() => _trafficOn = !_trafficOn);
     _snack('实时路况${_trafficOn ? '已开' : '已关'}');
   }
@@ -584,7 +589,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Column(
       children: [
         btn(Icons.layers_outlined, '实时路况', _toggleTraffic,
-            active: _trafficOn),
+            active: _trafficOn && _settings.mapTileSource.supportsTraffic),
         const SizedBox(height: 8),
         btn(Icons.add, '放大', () => _mapHandle.zoomIn()),
         const SizedBox(height: 8),

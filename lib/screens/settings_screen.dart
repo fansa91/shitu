@@ -308,6 +308,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      Text('底图来源',
+                          style: Theme.of(context).textTheme.titleSmall),
+                      const SizedBox(height: 8),
+                      SegmentedButton<MapTileSource>(
+                        segments: [
+                          for (final src in MapTileSource.values)
+                            ButtonSegment<MapTileSource>(
+                              value: src,
+                              label: Text(src.label),
+                            ),
+                        ],
+                        selected: {_settings.mapTileSource},
+                        onSelectionChanged: (s) =>
+                            _settings.setMapTileSource(s.first),
+                      ),
+                      const SizedBox(height: 14),
                       Text('底图样式',
                           style: Theme.of(context).textTheme.titleSmall),
                       const SizedBox(height: 8),
@@ -326,8 +342,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       const Padding(
                         padding: EdgeInsets.only(top: 10),
                         child: Text(
-                          '底图为高德 Web 瓦片（2D 平面图），卫星样式叠加路网标注；'
-                          '瓦片版无 3D 倾斜与建筑。底图不需要填 Key。',
+                          '底图为 Web 瓦片（2D 平面图），不需要填 Key；'
+                          '瓦片版无 3D 倾斜与建筑。高德卫星叠加路网标注、'
+                          '路况图层仅高德源可用；腾讯卫星只有影像、'
+                          '无标注与路况图层。',
                           style: TextStyle(fontSize: 12),
                         ),
                       ),

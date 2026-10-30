@@ -34,6 +34,7 @@ class SettingsService extends ChangeNotifier {
   static const _kTtsPresynthesize = 'tts_presynthesize';
   static const _kNvidiaVoice = 'nvidia_voice';
   static const _kMapBaseStyle = 'map_base_style';
+  static const _kMapTileSource = 'map_tile_source';
   static const _kThemeMode = 'theme_mode';
   static const _kDynamicColor = 'dynamic_color_enabled';
   static const _kSeedColorValue = 'seed_color_value';
@@ -47,6 +48,7 @@ class SettingsService extends ChangeNotifier {
   TtsEngine _ttsEngine = TtsEngine.system;
   bool _ttsPresynthesize = true;
   MapBaseStyle _mapBaseStyle = MapBaseStyle.standard;
+  MapTileSource _mapTileSource = MapTileSource.amap;
   AppThemeMode _themeMode = AppThemeMode.system;
   bool _dynamicColorEnabled = true;
   int _seedColorValue = 0xFF1A73E8; // brandSeedColor 的 ARGB
@@ -62,6 +64,11 @@ class SettingsService extends ChangeNotifier {
 
   /// 底图样式（瓦片图层组合）：标准 / 卫星，AppMap 据此切换瓦片模板。
   MapBaseStyle get mapBaseStyle => _mapBaseStyle;
+
+  /// 底图来源（瓦片服务商）：高德 / 腾讯，默认高德。与「数据源」
+  /// （搜索/算路服务商）相互独立；路况层跟随图源（见
+  /// [MapTileSource.supportsTraffic]）。
+  MapTileSource get mapTileSource => _mapTileSource;
 
   /// 外观：主题模式 / 是否跟随系统动态取色 / 自定义种子色。
   AppThemeMode get themeMode => _themeMode;
@@ -90,6 +97,7 @@ class SettingsService extends ChangeNotifier {
     _ttsEngine = _ttsFromName(prefs.getString(_kTtsEngine));
     _ttsPresynthesize = prefs.getBool(_kTtsPresynthesize) ?? true;
     _mapBaseStyle = _mapBaseStyleFromName(prefs.getString(_kMapBaseStyle));
+    _mapTileSource = _mapTileSourceFromName(prefs.getString(_kMapTileSource));
     _themeMode = _themeModeFromName(prefs.getString(_kThemeMode));
     _dynamicColorEnabled = prefs.getBool(_kDynamicColor) ?? true;
     _seedColorValue = prefs.getInt(_kSeedColorValue) ?? _seedColorValue;
@@ -156,6 +164,13 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kMapBaseStyle, value.name);
+  }
+
+  Future<void> setMapTileSource(MapTileSource value) async {
+    _mapTileSource = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kMapTileSource, value.name);
   }
 
   Future<void> setProvider(MapProvider value) async {
@@ -240,4 +255,8 @@ class SettingsService extends ChangeNotifier {
   MapBaseStyle _mapBaseStyleFromName(String? name) =>
       MapBaseStyle.values.where((e) => e.name == name).firstOrNull ??
       MapBaseStyle.standard;
+
+  MapTileSource _mapTileSourceFromName(String? name) =>
+      MapTileSource.values.where((e) => e.name == name).firstOrNull ??
+      MapTileSource.amap;
 }

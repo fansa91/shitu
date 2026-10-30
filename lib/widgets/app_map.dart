@@ -102,6 +102,7 @@ class AppMap extends StatelessWidget {
       alternativeRoutePoints: alternativeRoutePoints,
       trafficEnabled: trafficEnabled,
       baseStyle: settings.mapBaseStyle,
+      tileSource: settings.mapTileSource,
       handle: handle,
       myLocation: myLocation,
       onCameraSettled: onCameraSettled,

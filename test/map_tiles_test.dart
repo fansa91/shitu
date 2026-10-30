@@ -69,4 +69,63 @@ void main() {
       expect(t.y, (py / 256).floor());
     });
   });
+
+  group('腾讯瓦片（2026-10-30 curl 实测，行号翻转锚定）', () {
+    test('模板：矢量 rt 子域 + styleid=0；子域 0–3', () {
+      expect(
+        TencentTileTemplates.vector,
+        contains('rt{s}.map.gtimg.com/tile'),
+      );
+      expect(TencentTileTemplates.vector, contains('type=vector&styleid=0'));
+      expect(TencentTileTemplates.vector, contains('x={x}&y={y}'));
+      expect(TencentTileTemplates.subdomains, ['0', '1', '2', '3']);
+    });
+
+    test('翻转公式：y_tx = (2^z − 1) − y_osm', () {
+      expect(tencentFlippedY(osmY: 388, zoom: 10), 635);
+      expect(tencentFlippedY(osmY: 24832, zoom: 16), 40703);
+      expect(tencentFlippedY(osmY: 0, zoom: 1), 1);
+    });
+
+    test('天安门 z10 → (843, 635)：与高德同点 (843, 388) 翻转对应，实测同区', () {
+      final t = tencentTileCoord(
+        latitude: tiananmenLat,
+        longitude: tiananmenLng,
+        zoom: 10,
+      );
+      expect(t.x, 843);
+      expect(t.y, 635);
+    });
+
+    test('天安门 z16 → (53957, 40703)：实测与高德 (53957, 24832) 地物对位', () {
+      final t = tencentTileCoord(
+        latitude: tiananmenLat,
+        longitude: tiananmenLng,
+        zoom: 16,
+      );
+      expect(t.x, 53957);
+      expect(t.y, 40703);
+    });
+
+    test('卫星 URL：sateTiles 分组目录与文件名都用翻转坐标', () {
+      final url = TencentTileTemplates.satelliteUrl(
+        x: 53957,
+        flippedY: 40703,
+        zoom: 16,
+      );
+      // 分组目录 = 坐标 >> 4；子域按 (x + y) % 4 选取（此处余 0 → p0）。
+      expect(url, 'https://p0.map.gtimg.com/sateTiles/16/3372/2543/53957_40703.jpg');
+    });
+
+    test('缩放上限：矢量/卫星 maxNativeZoom 均为 18（z19 实测为纯色占位）', () {
+      expect(TencentTileTemplates.maxNativeZoom, 18);
+    });
+
+    test('图源属性：路况仅高德源可用；attribution 随源切换', () {
+      expect(MapTileSource.amap.supportsTraffic, isTrue);
+      expect(MapTileSource.tencent.supportsTraffic, isFalse);
+      expect(MapTileSource.amap.attribution, contains('高德'));
+      expect(MapTileSource.tencent.attribution, contains('腾讯'));
+    });
+  });
 }

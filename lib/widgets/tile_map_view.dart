@@ -7,6 +7,39 @@ import '../models/poi.dart';
 import '../services/map_tiles.dart';
 import 'app_map.dart';
 
+/// 腾讯瓦片的 TileProvider（flutter_map 8.3.2 的正规扩展点：
+/// 继承 [NetworkTileProvider] 覆写 getTileUrl）。
+///
+/// 腾讯瓦片行号原点在左下（TMS 式），与 flutter_map 的 Slippy 号
+/// 上下相反：生成 URL 前先按 [tencentFlippedY] 翻转行号（实测锚定
+/// 见 services/map_tiles.dart 的 TencentTileTemplates 注释）。
+/// 矢量层翻转后走模板替换（super.getTileUrl）；卫星层 URL 含
+/// {x>>4} 分组目录、模板表达不了，由 [TencentTileTemplates.satelliteUrl]
+/// 直接拼装。
+class TencentTileProvider extends NetworkTileProvider {
+  TencentTileProvider({required this.satellite});
+
+  /// true = 卫星影像；false = 矢量底图。
+  final bool satellite;
+
+  @override
+  String getTileUrl(TileCoordinates coordinates, TileLayer options) {
+    final flipped = TileCoordinates(
+      coordinates.x,
+      tencentFlippedY(osmY: coordinates.y, zoom: coordinates.z),
+      coordinates.z,
+    );
+    if (satellite) {
+      return TencentTileTemplates.satelliteUrl(
+        x: flipped.x,
+        flippedY: flipped.y,
+        zoom: flipped.z,
+      );
+    }
+    return super.getTileUrl(flipped, options);
+  }
+}
+
 /// 瓦片底图（flutter_map + 高德 Web 瓦片），全平台统一实现。
 ///
 /// 换赛道背景：高德原生 SDK 渲染器在一加 7 Pro 上两大版本、两种视图
@@ -28,6 +61,7 @@ class TileMapView extends StatefulWidget {
     this.alternativeRoutePoints = const [],
     this.trafficEnabled = false,
     this.baseStyle = MapBaseStyle.standard,
+    this.tileSource = MapTileSource.amap,
     this.handle,
     this.myLocation,
     this.onCameraSettled,
@@ -39,6 +73,10 @@ class TileMapView extends StatefulWidget {
   final List<GeoPoint> alternativeRoutePoints;
   final bool trafficEnabled;
   final MapBaseStyle baseStyle;
+
+  /// 底图来源（瓦片服务商）：路况层跟随图源，腾讯源无实测可用的
+  /// 路况瓦片，[trafficEnabled] 在腾讯源下不生效（见 map_tiles.dart）。
+  final MapTileSource tileSource;
   final MapHandle? handle;
 
   /// 我的位置（GCJ-02）：自绘蓝色圆点（与导航页 FakeMap 时代一致的画法）。
@@ -172,31 +210,7 @@ class _TileMapViewState extends State<TileMapView> {
             },
           ),
           children: [
-            TileLayer(
-              urlTemplate: widget.baseStyle == MapBaseStyle.satellite
-                  ? AmapTileTemplates.satellite
-                  : AmapTileTemplates.standard,
-              subdomains: AmapTileTemplates.subdomains,
-              userAgentPackageName: 'com.shitu.app',
-              maxNativeZoom: AmapTileTemplates.maxNativeZoom,
-            ),
-            if (widget.baseStyle == MapBaseStyle.satellite)
-              TileLayer(
-                urlTemplate: AmapTileTemplates.satelliteLabels,
-                subdomains: AmapTileTemplates.subdomains,
-                userAgentPackageName: 'com.shitu.app',
-                maxNativeZoom: AmapTileTemplates.maxNativeZoom,
-                // 个别瓦片取不到时保持透明，不挡下面的卫星影像。
-                errorTileCallback: (_, _, _) {},
-              ),
-            if (widget.trafficEnabled)
-              TileLayer(
-                urlTemplate: AmapTileTemplates.traffic,
-                userAgentPackageName: 'com.shitu.app',
-                maxNativeZoom: AmapTileTemplates.maxNativeZoom,
-                // 无路况数据区域端点回 404：吞掉，保持透明（见 map_tiles 实测）。
-                errorTileCallback: (_, _, _) {},
-              ),
+            ..._tileLayers(),
             if (widget.alternativeRoutePoints.length > 1 ||
                 widget.selectedRoutePoints.length > 1)
               PolylineLayer(
@@ -224,14 +238,14 @@ class _TileMapViewState extends State<TileMapView> {
             MarkerLayer(markers: _buildMarkers()),
           ],
         ),
-        // 底图版权标注（高德瓦片要求来源可见）。
-        const Positioned(
+        // 底图版权标注（随图源切换，瓦片服务要求来源可见）。
+        Positioned(
           right: 8,
           bottom: 6,
           child: IgnorePointer(
             child: Text(
-              '© 高德地图',
-              style: TextStyle(
+              widget.tileSource.attribution,
+              style: const TextStyle(
                 fontSize: 10,
                 color: Color(0x99000000),
                 shadows: [Shadow(color: Color(0xCCFFFFFF), blurRadius: 3)],
@@ -241,6 +255,59 @@ class _TileMapViewState extends State<TileMapView> {
         ),
       ],
     );
+  }
+
+  /// 瓦片图层组合（按图源 × 样式）：
+  /// - 高德标准：标准图；高德卫星：影像 + 透明标注 overlay；
+  ///   路况（开关开时）叠在最上。
+  /// - 腾讯标准：矢量图；腾讯卫星：只有影像（实测无独立标注层，
+  ///   见 map_tiles.dart）；腾讯源无可用路况层，不叠加。
+  List<Widget> _tileLayers() {
+    if (widget.tileSource == MapTileSource.tencent) {
+      return [
+        if (widget.baseStyle == MapBaseStyle.satellite)
+          TileLayer(
+            tileProvider: TencentTileProvider(satellite: true),
+            userAgentPackageName: 'com.shitu.app',
+            maxNativeZoom: TencentTileTemplates.maxNativeZoom,
+          )
+        else
+          TileLayer(
+            urlTemplate: TencentTileTemplates.vector,
+            subdomains: TencentTileTemplates.subdomains,
+            tileProvider: TencentTileProvider(satellite: false),
+            userAgentPackageName: 'com.shitu.app',
+            maxNativeZoom: TencentTileTemplates.maxNativeZoom,
+          ),
+      ];
+    }
+    return [
+      TileLayer(
+        urlTemplate: widget.baseStyle == MapBaseStyle.satellite
+            ? AmapTileTemplates.satellite
+            : AmapTileTemplates.standard,
+        subdomains: AmapTileTemplates.subdomains,
+        userAgentPackageName: 'com.shitu.app',
+        maxNativeZoom: AmapTileTemplates.maxNativeZoom,
+      ),
+      if (widget.baseStyle == MapBaseStyle.satellite)
+        TileLayer(
+          urlTemplate: AmapTileTemplates.satelliteLabels,
+          subdomains: AmapTileTemplates.subdomains,
+          userAgentPackageName: 'com.shitu.app',
+          maxNativeZoom: AmapTileTemplates.maxNativeZoom,
+          // 个别瓦片取不到时保持透明，不挡下面的卫星影像。
+          errorTileCallback: (_, _, _) {},
+        ),
+      if (widget.trafficEnabled)
+        TileLayer(
+          urlTemplate: AmapTileTemplates.traffic,
+          userAgentPackageName: 'com.shitu.app',
+          maxNativeZoom: AmapTileTemplates.maxNativeZoom,
+          // 无路况数据区域端点回 404：吞掉，保持透明（见 map_tiles 实测）。
+          errorTileCallback: (_, _, _) {},
+        ),
+    ];
   }
 
   List<Marker> _buildMarkers() {
