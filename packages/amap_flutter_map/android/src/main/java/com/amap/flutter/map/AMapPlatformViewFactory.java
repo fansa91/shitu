@@ -3,6 +3,7 @@ package com.amap.flutter.map;
 import android.content.Context;
 
 import com.amap.api.maps.model.CameraPosition;
+import com.amap.flutter.map.utils.BreadcrumbUtil;
 import com.amap.flutter.map.utils.ConvertUtil;
 import com.amap.flutter.map.utils.LogUtil;
 
@@ -42,6 +43,8 @@ class AMapPlatformViewFactory extends PlatformViewFactory {
             LogUtil.i(CLASS_NAME,"create params==>" + params);
             if (params.containsKey("privacyStatement")) {
                 ConvertUtil.setPrivacyStatement(context, params.get("privacyStatement"));
+                // [vendored patch] 面包屑打点：隐私注入完成（见 BreadcrumbUtil）。
+                BreadcrumbUtil.mark(context, "java_privacy_done");
             }
 
             Object options = ((Map<String, Object>) args).get("options");
@@ -68,6 +71,8 @@ class AMapPlatformViewFactory extends PlatformViewFactory {
 
             if (params.containsKey("apiKey")) {
                 ConvertUtil.checkApiKey(params.get("apiKey"));
+                // [vendored patch] 面包屑打点：Key 注入完成（见 BreadcrumbUtil）。
+                BreadcrumbUtil.mark(context, "java_apikey_done");
             }
 
             if (params.containsKey("debugMode")) {
@@ -76,6 +81,9 @@ class AMapPlatformViewFactory extends PlatformViewFactory {
 
         } catch (Throwable e) {
             LogUtil.e(CLASS_NAME, "create", e);
+            // [vendored patch] 异常可见：被吞掉的异常同步写进面包屑文件，
+            // 让 App 内诊断能看到异常类名，而不只是 logcat（见 BreadcrumbUtil）。
+            BreadcrumbUtil.error(context, e);
         }
         return builder.build(viewId, context, binaryMessenger, lifecycleProvider);
     }

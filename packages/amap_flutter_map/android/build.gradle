@@ -1,8 +1,20 @@
 // [vendored patch] 官方 3.0.0 的 build.gradle 是 2020 年配置（AGP 3.5.0 /
-// compileSdk 29 / jcenter / compileOnly 3dmap 8.1.0），无法在当前 Flutter
-// 构建链下工作。这里镜像同源 fork amap_map 1.0.15 已在本工程 CI 验证过的
-// 配置：namespace、compileSdk 35、mavenCentral 上的组合 SDK
-// 3dmap-location-search 10.1.200（implementation，保证运行时带 SDK）。
+// compileSdk 29 / jcenter），无法在当前 Flutter 构建链下工作。这里镜像同源
+// fork amap_map 1.0.15 已在本工程 CI 验证过的骨架：namespace、compileSdk 35、
+// mavenCentral。
+//
+// [vendored patch] 原生 SDK 版本二分（故障排查）：依赖改回官方 3.0.0 原配
+// 版本线——官方原始文件（pub 缓存 amap_flutter_map-3.0.0/android/build.gradle）
+// 的依赖行是 compileOnly 'com.amap.api:3dmap:8.1.0'。8.1.0 在 Maven Central
+// 是 jar 打包（非 aar），jar 内含 classes 与 lib/<abi>/libAMapSDK_MAP_v8_1_0.so；
+// Gradle 不会从普通 jar 依赖里提取 .so，故：
+//   1) 依赖行用 implementation（而非官方的 compileOnly——本插件必须自带 SDK
+//      运行时，宿主 App 不另行提供），版本与坐标与官方原配一致（8.1.0）；
+//   2) 本工程实际出包的三个 ABI（arm64-v8a / armeabi-v7a / x86_64）的 .so 已从
+//      同一个官方 jar 原样提取到 src/main/jniLibs/（SHA-256 见 VENDORED.md）。
+// 此前用的是组合包 3dmap-location-search 10.1.200——所有真机失败构建的共同
+// 因子，本轮二分就是把它换掉；location/search 原生 SDK 本工程未使用
+// （定位走 geolocator、搜索走 Web API），不随本次引入。
 group 'com.amap.flutter.map'
 version '1.0'
 
@@ -33,12 +45,17 @@ android {
     defaultConfig {
         minSdkVersion 21
     }
+    // [vendored patch] 8.1.0 的网络层（mapcore util）引用 Apache HttpClient，
+    // 该类库自 Android 6 起移出 bootclasspath；高德当年的官方接入文档即要求
+    // 宿主声明 useLibrary 'org.apache.http.legacy'，vendored 插件在此代为声明，
+    // 随库 Manifest 合并进 App。
+    useLibrary 'org.apache.http.legacy'
     lintOptions {
         disable 'InvalidPackage'
     }
 }
 
 dependencies {
-    implementation 'com.amap.api:3dmap-location-search:10.1.200_loc6.4.9_sea9.7.4'
+    implementation 'com.amap.api:3dmap:8.1.0'
     implementation 'androidx.annotation:annotation:1.9.1'
 }

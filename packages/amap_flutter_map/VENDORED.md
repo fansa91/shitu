@@ -32,10 +32,10 @@ vendoring 进本仓库 `packages/` 以 path 依赖引用。`example/` 与上游�
    `flutter test` CFE 编译失败的原因）。
 4. **Android 构建配置现代化**：`android/build.gradle` 镜像同源 fork
    amap_map 1.0.15 已在本工程 CI 验证的配置（namespace、compileSdk 35、
-   mavenCentral），SDK 依赖由 `compileOnly com.amap.api:3dmap:8.1.0` 改为
-   `implementation com.amap.api:3dmap-location-search:10.1.200_loc6.4.9_sea9.7.4`
-   （与此前线上版本相同的原生 SDK 版本，保证运行时带 SDK 且行为一致）；
-   `android/src/main/AndroidManifest.xml` 与 fork 对齐（namespace 模式）。
+   mavenCentral），SDK 依赖由 `compileOnly` 改为 `implementation`
+   （保证运行时带 SDK）；`android/src/main/AndroidManifest.xml` 与 fork
+   对齐（namespace 模式）。SDK 具体版本几经变化：最初随 fork 用组合包
+   10.1.200，后被第 10 条的版本二分取代。
 5. **iOS podspec**：`s.platform` 8.0 → 12.0（8.0 已被现行 Xcode/CocoaPods 拒绝）。
 6. **pubspec**：对 `amap_flutter_base` 的依赖改为 path 依赖
    `../amap_flutter_base`（同仓 vendoring 版）；SDK 约束现代化为
@@ -60,6 +60,55 @@ vendoring 进本仓库 `packages/` 以 path 依赖引用。`example/` 与上游�
      静态 `getLookupKeyForAsset` 改用 `io.flutter.embedding.engine.loader.
      FlutterLoader` 实例；新增幂等 `ConvertUtil.initialize(Context)`，
      由 `AMapPlatformViewFactory.create()` 在建图前调用。
+10. **原生 SDK 版本二分**（故障排查：所有真机失败构建的唯一共同因子是
+    组合包 10.1.200，故换回官方原配版本线验证）：
+    - 出处：pub 缓存 `amap_flutter_map-3.0.0/android/build.gradle` 的官方
+      原始依赖行是 `compileOnly 'com.amap.api:3dmap:8.1.0'`——版本本身就
+      是钉死的 8.1.0。本包改为 `implementation 'com.amap.api:3dmap:8.1.0'`
+      （用 implementation 而非 compileOnly，是因为本插件必须自带 SDK
+      运行时、宿主 App 不另行提供，属必要适配）。
+    - 8.1.0 在 Maven Central 是 **jar 打包**（SHA-256
+      `a8b1bbcd8ebdddd6ed3eb6167f1a4779f967ff71a8057582794a461d13010337`），
+      jar 内含 classes 与 `lib/<abi>/libAMapSDK_MAP_v8_1_0.so`；Gradle 不会
+      从普通 jar 依赖提取 .so，故把本工程实际出包的三个 ABI 的 .so 从该
+      官方 jar **原样**提取到 `android/src/main/jniLibs/`：
+      arm64-v8a `0c23055d7971c9424d0459fb0a7e6ac02745265e109e51ee4e226c197cce3550`、
+      armeabi-v7a `a57ef473ecf413653e92117d478f309ad4037a28c8277691f719e62326a4faa7`、
+      x86_64 `19194df0b00e6fc91b432ffcf8ad2c0c598e7611e90a022f37619f659026b5f1`
+      （armeabi/x86 两个 ABI 本工程不出包，未提取）。
+    - `android/build.gradle` 加 `useLibrary 'org.apache.http.legacy'`：
+      8.1.0 的 mapcore 网络层引用 Apache HttpClient（该库自 Android 6 起
+      移出 bootclasspath），高德当年官方接入文档即要求此声明。
+    - API 兼容（已用官方 jar 实测核对）：`MapsInitializer.setApiKey`、
+      反射用的 `updatePrivacyShow(Context, boolean, boolean)` /
+      `updatePrivacyAgree(Context, boolean)`、`MapView(Context, AMapOptions)`
+      与 `getMap()` 在 8.1.0 中均存在且签名一致，Java 调用零适配。
+    - 已知残留观察：8.1.0 的个别 mapcore util 类引用
+      `com.amap.api.location`（其内部 APS 定位路径）与
+      `org.apache.http`（仅 1 个 util 类）；本工程不启用 SDK 定位
+      （geolocator + 自绘标记），若真机命中 NoClassDefFoundError，
+      第 11 条的 java_error 打点会把它直接报出来。
+    - location/search 原生 SDK 未随本次引入（官方原配同样只有 3dmap；
+      本工程搜索走 Web API）。
+11. **Java 面包屑打点 + 异常可见**（与主工程 `MapCrashGuard` 联动）：
+    - 新增 `utils/BreadcrumbUtil.java`：向应用支持目录的
+      `amap_map_breadcrumbs.txt`（与 Dart 同一文件；path_provider 的
+      getApplicationSupportDirectory 在 Android 上对应
+      `Context.getFilesDir()`）追加写 `步骤名|毫秒时间戳`，写后立即
+      flush/close；自身异常全吞，绝不影响建图。
+    - 打点位置：`AMapPlatformViewFactory.create()` 在隐私注入后
+      `java_privacy_done`、Key 注入后 `java_apikey_done`；
+      `AMapPlatformView` 构造在 `new MapView` 前后
+      `java_mapview_ctor_start` / `java_mapview_ctor_done`、`getMap()` 后
+      `java_getmap_done`；生命周期 `onCreate` 完成 MapView.onCreate 后
+      `java_oncreate_done`。
+    - 异常可见：工厂 `create`、`AMapOptionsBuilder.build`、
+      `AMapPlatformView` 构造与 `onCreate` 的 `catch (Throwable)` 在原有
+      LogUtil 之外，再经 `BreadcrumbUtil.error` 写一行
+      `java_error:<异常类简单名>`（只写类名——message 可能含 `|`/换行
+      破坏行格式）。Dart 侧编解码已兼容 java_ 步骤与异常行，诊断展示为
+      「原生：…」/「原生异常：<类名>」，自保判定不变、停留步自然落到
+      最后一条 Java 子步骤/异常。
 
 ## 未改动的原有机制（与换插件决策相关）
 

@@ -33,22 +33,68 @@ enum MapBreadcrumbStep {
   }
 }
 
-/// 一条面包屑：步骤 + 发生时间。
-class MapBreadcrumb {
-  const MapBreadcrumb(this.step, this.at);
+/// 原生（Java）侧步骤名 → 中文展示名。vendored 高德插件在建图链路的原生
+/// 关键点（隐私/Key 注入、MapView 构造、getMap、onCreate）与 Dart 写同一个
+/// 面包屑文件（步骤名带 `java_` 前缀），让 Dart 到不了的原生窗口也能见光；
+/// 构造期被原生 catch (Throwable) 吞掉的异常写成 `java_error:<异常类名>`。
+const Map<String, String> _javaStepLabels = {
+  'java_privacy_done': '原生：隐私注入完成',
+  'java_apikey_done': '原生：Key 注入完成',
+  'java_mapview_ctor_start': '原生：地图视图构造开始',
+  'java_mapview_ctor_done': '原生：地图视图构造完成',
+  'java_getmap_done': '原生：地图实例取得',
+  'java_oncreate_done': '原生：地图 onCreate 完成',
+};
 
-  final MapBreadcrumbStep step;
+/// 任意落盘步骤名的展示文案：Dart 已知步骤用枚举中文名，Java 步骤查上表，
+/// `java_error:<类名>` 展示为「原生异常：<类名>」，未登记的 Java 步骤与
+/// 其它未知名字原样展示（不丢信息）。
+String breadcrumbLabel(String wireName, MapBreadcrumbStep? step) {
+  if (step != null) return step.label;
+  if (wireName.startsWith('java_error:')) {
+    return '原生异常：${wireName.substring('java_error:'.length)}';
+  }
+  return _javaStepLabels[wireName] ?? wireName;
+}
+
+/// 一条面包屑：步骤 + 发生时间。
+///
+/// Dart 自己落盘的步骤恒有 [step]；Java 侧写进同一文件的步骤不在 Dart
+/// 枚举里，[step] 为 null、靠 [wireName] 原样识别。两者编解码格式相同
+/// （`名称|毫秒时间戳`)，解析时一视同仁地保留顺序。
+class MapBreadcrumb {
+  const MapBreadcrumb(this.step, this.at) : wireNameRaw = null;
+
+  const MapBreadcrumb.rawStep(this.wireNameRaw, this.at) : step = null;
+
+  /// Dart 已知步骤；Java 侧步骤为 null。
+  final MapBreadcrumbStep? step;
+
+  /// Java 侧步骤的原始落盘名；Dart 步骤为 null（用 [MapBreadcrumbStep.wireName]）。
+  final String? wireNameRaw;
+
   final DateTime at;
 
-  String encode() => '${step.wireName}|${at.millisecondsSinceEpoch}';
+  String get wireName => wireNameRaw ?? step!.wireName;
+
+  /// 给用户看的中文名（横幅/诊断区用）。
+  String get label => breadcrumbLabel(wireName, step);
+
+  String encode() => '$wireName|${at.millisecondsSinceEpoch}';
 
   static MapBreadcrumb? decode(String line) {
     final sep = line.lastIndexOf('|');
     if (sep <= 0) return null;
-    final step = MapBreadcrumbStep.fromWireName(line.substring(0, sep));
+    final name = line.substring(0, sep);
     final millis = int.tryParse(line.substring(sep + 1));
-    if (step == null || millis == null) return null;
-    return MapBreadcrumb(step, DateTime.fromMillisecondsSinceEpoch(millis));
+    if (millis == null) return null;
+    final at = DateTime.fromMillisecondsSinceEpoch(millis);
+    final step = MapBreadcrumbStep.fromWireName(name);
+    if (step != null) return MapBreadcrumb(step, at);
+    // Java 侧步骤（含 java_error:<异常类名>）：不在 Dart 枚举里，原样保留，
+    // 否则原生窗口里的最后一步会被解析丢弃、自保永远只报「地图创建开始」。
+    if (name.startsWith('java_')) return MapBreadcrumb.rawStep(name, at);
+    return null;
   }
 }
 
@@ -66,16 +112,19 @@ List<MapBreadcrumb> decodeBreadcrumbRound(String? raw) {
 /// 自保判定（纯函数，可单测）：
 /// 上一轮只要走过建图链路（非空）、却既没到「首帧渲染」也没到「正常销毁」，
 /// 就认定上一轮是死在建图过程中的原生崩溃，本轮触发自保（回落示意地图）。
-/// 停留步骤 = 该轮最后一个步骤。
-({bool tripped, MapBreadcrumbStep? stoppedAt}) evaluateCrashGuard(
+/// 停留步 = 该轮最后一条面包屑（可能是 Java 侧步骤/异常，故返回面包屑
+/// 本身而非枚举，展示走 [MapBreadcrumb.label]）。
+({bool tripped, MapBreadcrumb? stoppedAt}) evaluateCrashGuard(
   List<MapBreadcrumb> previousRound,
 ) {
   if (previousRound.isEmpty) return (tripped: false, stoppedAt: null);
-  final steps = previousRound.map((b) => b.step).toSet();
-  final survived = steps.contains(MapBreadcrumbStep.firstFrame) ||
-      steps.contains(MapBreadcrumbStep.mapDisposedClean);
+  final survived = previousRound.any(
+    (b) =>
+        b.step == MapBreadcrumbStep.firstFrame ||
+        b.step == MapBreadcrumbStep.mapDisposedClean,
+  );
   if (survived) return (tripped: false, stoppedAt: null);
-  return (tripped: true, stoppedAt: previousRound.last.step);
+  return (tripped: true, stoppedAt: previousRound.last);
 }
 
 /// 面包屑落盘介质（同步 API：原生崩溃随时可能发生，异步写来不及）。
@@ -165,13 +214,14 @@ class MapCrashGuard extends ChangeNotifier {
   late final List<MapBreadcrumb> _previousRound;
   final List<MapBreadcrumb> _currentRound = [];
   bool _tripped = false;
-  MapBreadcrumbStep? _stoppedAt;
+  MapBreadcrumb? _stoppedAt;
 
   /// 上一轮是否死在建图过程中（本轮应自动回落示意地图）。
   bool get guardTripped => _tripped;
 
-  /// 上一轮停留的步骤（触发自保时非空）。
-  MapBreadcrumbStep? get stoppedAt => _stoppedAt;
+  /// 上一轮停留的那条面包屑（触发自保时非空；展示用其 label/wireName，
+  /// 可能是 Dart 步骤，也可能是 Java 侧步骤或 `java_error:<异常类名>`）。
+  MapBreadcrumb? get stoppedAt => _stoppedAt;
 
   List<MapBreadcrumb> get previousRound =>
       List.unmodifiable(_previousRound);
@@ -200,9 +250,8 @@ class MapCrashGuard extends ChangeNotifier {
       '${t.minute.toString().padLeft(2, '0')}:'
       '${t.second.toString().padLeft(2, '0')}';
 
-  static String _roundText(List<MapBreadcrumb> round) => round
-      .map((b) => '${b.step.label} ${_clock(b.at)}')
-      .join(' → ');
+  static String _roundText(List<MapBreadcrumb> round) =>
+      round.map((b) => '${b.label} ${_clock(b.at)}').join(' → ');
 
   /// 诊断区文案（设置 → 关于，可复制）：自保状态 + 两轮步骤序列。
   String breadcrumbReport() {

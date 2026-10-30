@@ -17,6 +17,7 @@ import com.amap.flutter.map.core.MapController;
 import com.amap.flutter.map.overlays.marker.MarkersController;
 import com.amap.flutter.map.overlays.polygon.PolygonsController;
 import com.amap.flutter.map.overlays.polyline.PolylinesController;
+import com.amap.flutter.map.utils.BreadcrumbUtil;
 import com.amap.flutter.map.utils.LogUtil;
 
 import java.util.HashMap;
@@ -51,6 +52,9 @@ public class AMapPlatformView
 
     private MapView mapView;
 
+    // [vendored patch] 留存 Context 供生命周期回调里的面包屑打点/异常可见使用。
+    private final Context context;
+
     private boolean disposed = false;
 
     private final Map<String, MyMethodCallHandler> myMethodCallHandlerMap;
@@ -61,13 +65,18 @@ public class AMapPlatformView
                      LifecycleProvider lifecycleProvider,
                      AMapOptions options) {
 
+        this.context = context;
         methodChannel = new MethodChannel(binaryMessenger, "amap_flutter_map_" + id);
         methodChannel.setMethodCallHandler(this);
         myMethodCallHandlerMap = new HashMap<String, MyMethodCallHandler>(8);
 
         try {
+            // [vendored patch] 面包屑打点：MapView 构造窗口（见 BreadcrumbUtil）。
+            BreadcrumbUtil.mark(context, "java_mapview_ctor_start");
             mapView = new MapView(context, options);
+            BreadcrumbUtil.mark(context, "java_mapview_ctor_done");
             AMap amap = mapView.getMap();
+            BreadcrumbUtil.mark(context, "java_getmap_done");
             mapController = new MapController(methodChannel, mapView);
             markersController = new MarkersController(methodChannel, amap);
             polylinesController = new PolylinesController(methodChannel, amap);
@@ -76,6 +85,9 @@ public class AMapPlatformView
             lifecycleProvider.getLifecycle().addObserver(this);
         } catch (Throwable e) {
             LogUtil.e(CLASS_NAME, "<init>", e);
+            // [vendored patch] 异常可见：构造期被吞掉的 Java 异常（如 .so 加载
+            // 失败）同步写进面包屑（见 BreadcrumbUtil）。
+            BreadcrumbUtil.error(context, e);
         }
     }
 
@@ -149,9 +161,13 @@ public class AMapPlatformView
             }
             if (null != mapView) {
                 mapView.onCreate(null);
+                // [vendored patch] 面包屑打点：MapView.onCreate 完成。
+                BreadcrumbUtil.mark(context, "java_oncreate_done");
             }
         } catch (Throwable e) {
             LogUtil.e(CLASS_NAME, "onCreate", e);
+            // [vendored patch] 异常可见（见 BreadcrumbUtil）。
+            BreadcrumbUtil.error(context, e);
         }
     }
 

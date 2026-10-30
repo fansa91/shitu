@@ -9,6 +9,7 @@ import com.amap.api.maps.model.CustomMapStyleOptions;
 import com.amap.api.maps.model.LatLngBounds;
 import com.amap.api.maps.model.MyLocationStyle;
 import com.amap.flutter.map.core.AMapOptionsSink;
+import com.amap.flutter.map.utils.BreadcrumbUtil;
 import com.amap.flutter.map.utils.LogUtil;
 
 
@@ -100,6 +101,9 @@ class AMapOptionsBuilder implements AMapOptionsSink {
             return aMapPlatformView;
         } catch (Throwable e) {
             LogUtil.e(CLASS_NAME, "build", e);
+            // [vendored patch] 异常可见：build 包着平台视图构造调用，构造期被
+            // 吞掉的异常（如控制器为空的 NPE）同步写进面包屑（见 BreadcrumbUtil）。
+            BreadcrumbUtil.error(context, e);
         }
         return null;
     }
