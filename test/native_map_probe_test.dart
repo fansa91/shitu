@@ -7,6 +7,11 @@ void main() {
       final s = parseProbeStatus(null, null);
       expect(s.outcome, ProbeOutcome.neverTried);
       expect(s.at, isNull);
+      expect(s.step, isNull);
+    });
+
+    test('空字符串 → neverTried（留痕损坏不误判）', () {
+      expect(parseProbeStatus('', 1).outcome, ProbeOutcome.neverTried);
     });
 
     test('loaded + 时间戳 → loaded 且带时间', () {
@@ -14,17 +19,28 @@ void main() {
       final s = parseProbeStatus('loaded', millis);
       expect(s.outcome, ProbeOutcome.loaded);
       expect(s.at, DateTime.fromMillisecondsSinceEpoch(millis));
+      expect(s.step, isNull);
     });
 
-    test('started → startedOnly（启动后未完成）', () {
+    test('started → stoppedAtStep 且 step=started', () {
       final s = parseProbeStatus('started', 1793400000000);
-      expect(s.outcome, ProbeOutcome.startedOnly);
+      expect(s.outcome, ProbeOutcome.stoppedAtStep);
+      expect(s.step, 'started');
       expect(s.at, isNotNull);
     });
 
-    test('未知状态值 → neverTried（留痕损坏不误判）', () {
-      expect(parseProbeStatus('weird', 1).outcome, ProbeOutcome.neverTried);
-      expect(parseProbeStatus('', null).outcome, ProbeOutcome.neverTried);
+    test('中间步骤原样保留（分步留痕判读死点）', () {
+      for (final step in [
+        'privacy_done',
+        'key_set',
+        'view_created',
+        'oncreate_done',
+        'onresume_done',
+      ]) {
+        final s = parseProbeStatus(step, 1793400000000);
+        expect(s.outcome, ProbeOutcome.stoppedAtStep, reason: step);
+        expect(s.step, step, reason: step);
+      }
     });
 
     test('有状态无时间戳：outcome 照常、时间为 null', () {
@@ -35,11 +51,12 @@ void main() {
   });
 
   group('probeStatusText', () {
-    test('neverTried 文案', () {
-      expect(
-        probeStatusText(const ProbeStatus(ProbeOutcome.neverTried, null)),
-        contains('尚未试过'),
+    test('neverTried 文案标注导航 SDK 9.8.3', () {
+      final text = probeStatusText(
+        const ProbeStatus(ProbeOutcome.neverTried, null),
       );
+      expect(text, contains('尚未试过'));
+      expect(text, contains('导航 SDK 9.8.3'));
     });
 
     test('loaded 文案带成功字样', () {
@@ -51,12 +68,17 @@ void main() {
       expect(text, contains('14:05'));
     });
 
-    test('startedOnly 文案是疑似崩溃口径', () {
+    test('stoppedAtStep 文案报停在哪一步', () {
       final text = probeStatusText(
-        ProbeStatus(ProbeOutcome.startedOnly, DateTime(2026, 10, 30, 9, 41)),
+        ProbeStatus(
+          ProbeOutcome.stoppedAtStep,
+          DateTime(2026, 10, 30, 9, 41),
+          step: 'view_created',
+        ),
       );
-      expect(text, contains('未完成'));
+      expect(text, contains('上次停在：view_created'));
       expect(text, contains('疑似崩溃'));
+      expect(text, contains('10月30日'));
     });
 
     test('无时间时不带括号后缀', () {
@@ -64,6 +86,14 @@ void main() {
         const ProbeStatus(ProbeOutcome.loaded, null),
       );
       expect(text, '上次加载成功');
+      final stopped = probeStatusText(
+        const ProbeStatus(
+          ProbeOutcome.stoppedAtStep,
+          null,
+          step: 'started',
+        ),
+      );
+      expect(stopped, '上次停在：started——疑似崩溃');
     });
   });
 

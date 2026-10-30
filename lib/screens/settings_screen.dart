@@ -573,7 +573,7 @@ class _SettingsScreenState extends State<SettingsScreen>
                 Card(
                   child: ListTile(
                     leading: const Icon(Icons.science_outlined),
-                    title: const Text('原生地图探针（实验）'),
+                    title: const Text('原生地图探针（实验 · 导航 SDK 9.8.3）'),
                     subtitle: Text(
                       _probeStatus == null
                           ? '读取中…'

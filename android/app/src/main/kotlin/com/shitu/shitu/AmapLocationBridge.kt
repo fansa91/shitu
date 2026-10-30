@@ -10,11 +10,11 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 
 /**
- * 高德定位 SDK（6.5.1）的最小原生桥。定位类由 app 的组合包依赖
- * com.amap.api:3dmap-location-search:10.1.600_loc6.5.1 提供（其内
- * 定位版本恰为 6.5.1；独立 location 工件与任何 3dmap 工件都会因
- * jar 内自带的定位门面类产生 dex 重复类冲突，选型见 app 的
- * build.gradle.kts 注释）：
+ * 高德定位 SDK 的最小原生桥。定位类由 app 的导航合包 9.8.3 本地
+ * jar 提供（libs/amap-navi-sdk-9.8.3.jar，合包自带定位版本
+ * **6.4.2**；独立 location 工件与任何合包工件都会因 jar 内自带
+ * 的定位门面类产生 dex 重复类冲突，选型与来源见 app 的
+ * build.gradle.kts 依赖注释）：
  * Dart 侧 lib/services/amap_location.dart 经 MethodChannel
  * （com.shitu.app/amap_location）+ EventChannel
  * （com.shitu.app/amap_location_stream）调用。
@@ -23,7 +23,8 @@ import io.flutter.plugin.common.MethodChannel
  * 坐标是高德原生 GCJ-02，桥原样透传，Dart 侧禁止再转换。
  *
  * 注意：本文件在本机无 Android SDK 未经编译，首编译在 CI 出包
- * 轮次；写时已按 6.5.1 的公开 API 逐项核对方法签名。
+ * 轮次；桥用到的全部 API 已用 javap 对导航合包 jar（定位 6.4.2）
+ * 逐项复核签名齐备，与此前 6.5.1 组合包相比桥代码零改动。
  */
 class AmapLocationBridge(messenger: BinaryMessenger, private val appContext: Context) {
 
@@ -81,7 +82,7 @@ class AmapLocationBridge(messenger: BinaryMessenger, private val appContext: Con
         try {
             AMapLocationClient.updatePrivacyShow(appContext, true, true)
             AMapLocationClient.updatePrivacyAgree(appContext, true)
-            // setApiKey 是 AMapLocationClient 的静态方法（6.5.1），
+            // setApiKey 是 AMapLocationClient 的静态方法（6.4.2 同），
             // 不能经实例调用，且应在构造 client 之前设置。
             AMapLocationClient.setApiKey(apiKey)
             if (client == null) {
@@ -167,8 +168,9 @@ class AmapLocationBridge(messenger: BinaryMessenger, private val appContext: Con
         // 反而偏数百米。
         option.setOffset(true)
         // 高精度模式下优先等卫星定位收敛（上限 10 秒，超时回融合
-        // 结果），争取室外米级精度。setGpsFirst/setGpsFirstTimeout/
-        // setOffset 均已按 6.5.1 官方 jar 的类签名核实存在。
+        // 结果），争取室外米级精度。setGpsFirst/setGpsFirstTimeout
+        // (long)/setOffset 均已按导航合包 jar（定位 6.4.2）的类签名
+        // 用 javap 核实存在。
         option.setGpsFirst(true)
         option.setGpsFirstTimeout(10_000)
         return option
