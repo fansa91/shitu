@@ -110,6 +110,14 @@ vendoring 进本仓库 `packages/` 以 path 依赖引用。`example/` 与上游�
       「原生：…」/「原生异常：<类名>」，自保判定不变、停留步自然落到
       最后一条 Java 子步骤/异常。
 
+11. **R8 consumer 规则（v0.2.5 首轮 CI 修复）**：
+    `android/consumer-rules.pro` + `defaultConfig.consumerProguardFiles`。
+    首轮 CI 的 `:app:minifyReleaseWithR8` 以 Missing class 硬失败：
+    8.1.0 的 mapcore util 引用 `com.amap.api.location.*`（定位 SDK），
+    本工程有意不引入（定位走 geolocator），10.1.200 组合包自带这些类
+    故旧构建不触发。规则仅一条 `-dontwarn com.amap.api.location.**`，
+    让 R8 剥离对应代码路径；本工程不使用高德自带定位图层，无运行时影响。
+
 ## 未改动的原有机制（与换插件决策相关）
 
 - 运行时 Key/隐私注入走 AMapWidget 的 `apiKey` / `privacyStatement` 创建参数：

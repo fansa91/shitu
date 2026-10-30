@@ -44,6 +44,10 @@ android {
 
     defaultConfig {
         minSdkVersion 21
+        // [vendored patch] 随库下发 R8 规则：8.1.0 mapcore 引用了本工程
+        // 有意不引入的定位 SDK 类，缺此规则 :app:minifyReleaseWithR8 会以
+        // Missing class 硬失败（详见 consumer-rules.pro 内注释）。
+        consumerProguardFiles 'consumer-rules.pro'
     }
     // [vendored patch] 8.1.0 的网络层（mapcore util）引用 Apache HttpClient，
     // 该类库自 Android 6 起移出 bootclasspath；高德当年的官方接入文档即要求
