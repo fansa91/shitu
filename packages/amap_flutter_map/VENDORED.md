@@ -7,11 +7,14 @@ vendoring 进本仓库 `packages/` 以 path 依赖引用。`example/` 与上游�
 换插件背景：原先使用的社区 fork `amap_map 1.0.15` 在一加 7 Pro / Android 10
 上创建地图必崩（应用内面包屑实锤死在 TextureMapView 原生创建内部，Key、
 签名、创建参数、Impeller 均已排除）。本包与官方 3.0.0 同为 TextureMapView，
-故以下列补丁把渲染路径换成普通 MapView（SurfaceView 系）。
+故补丁 1 先把渲染路径换成普通 MapView（SurfaceView 系）二分；其后 SDK 又
+降回 8.1.0（补丁 10）并加细粒度 Java 打点（补丁 11），v0.2.5 真机实测
+MapView 创建链全程走通、进程改死在 onCreate 之后的渲染启动段，故补丁 12
+把视图类换回 TextureMapView（TextureView 路径）继续二分该段。
 
 ## 补丁清单（每处在代码里都有 `[vendored patch]` 注释）
 
-1. **Android 视图类替换（核心补丁）**：
+1. **Android 视图类替换（核心补丁；视图类部分已被补丁 12 反转，见下）**：
    - `android/.../AMapPlatformView.java`：字段与构造 `TextureMapView` → `MapView`
      （`new MapView(context, options)`）；两者生命周期方法
      （onCreate/onResume/onPause/onDestroy/onLowMemory/onSaveInstanceState）
@@ -117,6 +120,41 @@ vendoring 进本仓库 `packages/` 以 path 依赖引用。`example/` 与上游�
     本工程有意不引入（定位走 geolocator），10.1.200 组合包自带这些类
     故旧构建不触发。规则仅一条 `-dontwarn com.amap.api.location.**`，
     让 R8 剥离对应代码路径；本工程不使用高德自带定位图层，无运行时影响。
+12. **视图类换回 TextureMapView + 渲染段打点（v0.2.6）**：
+    - 背景：v0.2.5（SDK 8.1.0 + 传统解压打包）真机：安装问题已由传统打包
+      解决；Java 创建链全程走通（Key 注入→MapView 构造→getMap→onCreate
+      完成、无 java_error），进程死在 onCreate 之后、Dart on_map_created
+      之前的渲染启动段。MapView（SurfaceView）+混合合成这条路径此前从未
+      被测到这一段，故换 TextureMapView（TextureView 路径）继续二分。
+    - 视图类替换（反转补丁 1 的视图类部分，Dart 混合合成保持不动——
+      TextureView 与混合合成兼容，避免同时改两个变量）：
+      `AMapPlatformView` 字段/构造与 `core/MapController` 字段/构造参数
+      类型 `MapView` → `TextureMapView`（`new TextureMapView(context,
+      options)`；字段名沿用 `mapView`）。API 核验（对 8.1.0 官方 jar
+      javap 实测）：TextureMapView 构造器 (Context)/(Context,
+      AMapOptions)、`getMap()`、`onCreate/onResume/onPause/onDestroy/
+      onSaveInstanceState/onLowMemory` 与 MapView 完全一致，零适配；
+      jar 的 SHA-256 与第 10 条记录一致。
+    - 渲染段面包屑（沿用 BreadcrumbUtil、同文件同格式，Dart 展示映射已
+      在主工程 `map_crash_guard.dart` 补齐中文名）：
+      - `java_ctor_done`：`AMapPlatformView` 构造器末尾（与
+        `java_mapview_ctor_done` 仅 new 视图完成区分，中间隔着 getMap 与
+        四个 controller 初始化）。视图构造的 wire 名沿用 `java_mapview_*`
+        不改（历史落盘记录与 Dart 映射按此名识别）。
+      - `java_onresume_start` / `java_onresume_done`：生命周期 onResume
+        里夹住 `mapView.onResume()` 前后；该 catch 原先只记 LogUtil，
+        本轮补齐 `BreadcrumbUtil.error` 异常可见（与 onCreate 一致）。
+      - `java_map_loaded`：构造里经 `addOnMapLoadedListener` 附加的
+        只打点监听触发时（MapController 自身亦以 add 注册，附加不冲突、
+        不改既有就绪流程）。
+      - `java_map_ready`：等价落点说明——8.1.0 的 `AMap` **没有**
+        `getMapAsync` / `OnMapReadyCallback`（javap 实测无此方法/类），
+        无法按新版 SDK 的回调打点；本 SDK 中「地图就绪」的原生信号即
+        OnMapLoaded 到达 `MapController`（Dart `map#waitForMap` 正等在
+        其 `mapReadyResult` 答复点），故在 `MapController.onMapLoaded()`
+        答复 result 之前打 `java_map_ready`，语义等价。判读：死在渲染
+        启动段时 `java_map_ready`/`java_map_loaded` 都不会出现，停留步
+        落在 `java_onresume_done`（或更早）即为实锤。
 
 ## 未改动的原有机制（与换插件决策相关）
 

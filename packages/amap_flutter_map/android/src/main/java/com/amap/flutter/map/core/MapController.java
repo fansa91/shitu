@@ -9,8 +9,10 @@ import androidx.annotation.NonNull;
 import com.amap.api.maps.AMap;
 import com.amap.api.maps.CameraUpdate;
 import com.amap.api.maps.CameraUpdateFactory;
-import com.amap.api.maps.MapView;
-// [vendored patch] TextureMapView -> MapView：纹理视图创建路径在一加 7 Pro / Android 10 上原生崩溃，改走普通 MapView（SurfaceView）渲染路径；两者生命周期/API 一一对应。
+import com.amap.api.maps.TextureMapView;
+// [vendored patch] 视图类跟随 AMapPlatformView：补丁 1 曾换 MapView，补丁 12
+// 换回 TextureMapView（详见 AMapPlatformView 的补丁注释与 VENDORED.md 第 12
+// 条）；本类只用到 getMap()/getWidth()/getHeight()，两类 API 一致。
 import com.amap.api.maps.model.CameraPosition;
 import com.amap.api.maps.model.CustomMapStyleOptions;
 import com.amap.api.maps.model.LatLng;
@@ -18,6 +20,7 @@ import com.amap.api.maps.model.LatLngBounds;
 import com.amap.api.maps.model.MyLocationStyle;
 import com.amap.api.maps.model.Poi;
 import com.amap.flutter.map.MyMethodCallHandler;
+import com.amap.flutter.map.utils.BreadcrumbUtil;
 import com.amap.flutter.map.utils.Const;
 import com.amap.flutter.map.utils.ConvertUtil;
 import com.amap.flutter.map.utils.LogUtil;
@@ -47,7 +50,7 @@ public class MapController
     private static boolean hasStarted = false;
     private final MethodChannel methodChannel;
     private final AMap amap;
-    private final MapView mapView;
+    private final TextureMapView mapView;
     private MethodChannel.Result mapReadyResult;
     protected int[] myArray = {};
 
@@ -55,7 +58,7 @@ public class MapController
 
     private boolean mapLoaded = false;
 
-    public MapController(MethodChannel methodChannel, MapView mapView) {
+    public MapController(MethodChannel methodChannel, TextureMapView mapView) {
         this.methodChannel = methodChannel;
         this.mapView = mapView;
         amap = mapView.getMap();
@@ -158,12 +161,20 @@ public class MapController
         LogUtil.i(CLASS_NAME, "onMapLoaded==>");
         try {
             mapLoaded = true;
+            // [vendored patch] 渲染段打点（补丁 12）：java_map_ready 落点。
+            // 8.1.0 的 AMap 没有 getMapAsync/OnMapReadyCallback（已对官方 jar
+            // javap 实测），本 SDK 中「地图就绪」的原生信号就是 OnMapLoaded
+            // 到达本 controller——Dart 侧 map#waitForMap 正等在此处答复，
+            // 故在答复挂起的 result 之前打点，语义等价于 onMapReady。
+            BreadcrumbUtil.mark(mapView.getContext(), "java_map_ready");
             if (null != mapReadyResult) {
                 mapReadyResult.success(null);
                 mapReadyResult = null;
             }
         } catch (Throwable e) {
             LogUtil.e(CLASS_NAME, "onMapLoaded", e);
+            // [vendored patch] 异常可见（见 BreadcrumbUtil）。
+            BreadcrumbUtil.error(mapView.getContext(), e);
         }
         if (LogUtil.isDebugMode && !hasStarted) {
             hasStarted = true;

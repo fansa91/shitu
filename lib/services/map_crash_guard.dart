@@ -34,7 +34,8 @@ enum MapBreadcrumbStep {
 }
 
 /// 原生（Java）侧步骤名 → 中文展示名。vendored 高德插件在建图链路的原生
-/// 关键点（隐私/Key 注入、MapView 构造、getMap、onCreate）与 Dart 写同一个
+/// 关键点（隐私/Key 注入、地图视图构造、getMap、onCreate，以及渲染段的
+/// 平台视图构造末尾、onResume 前后、地图就绪/加载完成）与 Dart 写同一个
 /// 面包屑文件（步骤名带 `java_` 前缀），让 Dart 到不了的原生窗口也能见光；
 /// 构造期被原生 catch (Throwable) 吞掉的异常写成 `java_error:<异常类名>`。
 const Map<String, String> _javaStepLabels = {
@@ -44,6 +45,11 @@ const Map<String, String> _javaStepLabels = {
   'java_mapview_ctor_done': '原生：地图视图构造完成',
   'java_getmap_done': '原生：地图实例取得',
   'java_oncreate_done': '原生：地图 onCreate 完成',
+  'java_ctor_done': '原生：平台视图构造完成',
+  'java_onresume_start': '原生：地图 onResume 开始',
+  'java_onresume_done': '原生：地图 onResume 完成',
+  'java_map_ready': '原生：地图就绪',
+  'java_map_loaded': '原生：地图加载完成',
 };
 
 /// 任意落盘步骤名的展示文案：Dart 已知步骤用枚举中文名，Java 步骤查上表，

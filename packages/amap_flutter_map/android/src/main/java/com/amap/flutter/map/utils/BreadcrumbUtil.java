@@ -15,8 +15,9 @@ import java.nio.charset.StandardCharsets;
  * 「步骤名|毫秒时间戳」一行一条、追加写、写后立即关闭，确保进程被原生
  * 崩溃杀死时已落盘。
  *
- * Dart 枚举覆盖不到的原生窗口（隐私/Key 注入、MapView 构造、getMap、
- * onCreate）靠 java_ 前缀步骤照亮；构造链路上被 catch (Throwable) 吞掉的
+ * Dart 枚举覆盖不到的原生窗口（隐私/Key 注入、地图视图构造、getMap、
+ * onCreate，以及补丁 12 起的渲染段：平台视图构造末尾、onResume 前后、
+ * 地图就绪/加载完成）靠 java_ 前缀步骤照亮；构造链路上被 catch (Throwable) 吞掉的
  * Java 异常（如 .so 加载失败 UnsatisfiedLinkError）另写一行
  * 「java_error:&lt;异常类名&gt;」，让「不崩也不出图」能在 App 内诊断里
  * 直接可见，而不是只躺在 logcat 里。

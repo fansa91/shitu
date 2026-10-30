@@ -11,8 +11,12 @@ import androidx.lifecycle.LifecycleOwner;
 
 import com.amap.api.maps.AMap;
 import com.amap.api.maps.AMapOptions;
-import com.amap.api.maps.MapView;
-// [vendored patch] TextureMapView -> MapView：纹理视图创建路径在一加 7 Pro / Android 10 上原生崩溃，改走普通 MapView（SurfaceView）渲染路径；两者生命周期/API 一一对应。
+import com.amap.api.maps.TextureMapView;
+// [vendored patch] 视图类选择（补丁 1 → 补丁 12 反转）：补丁 1 曾把官方原版
+// TextureMapView 换成 MapView（SurfaceView）二分渲染路径；v0.2.5 真机实测
+// MapView 创建链（构造/getMap/onCreate）全程走通、进程死在 onCreate 之后的
+// 渲染启动段，故补丁 12 换回 TextureMapView（TextureView 路径）继续二分。
+// 两者构造器/生命周期/getMap 的 API 面已对 8.1.0 官方 jar 用 javap 核验一致。
 import com.amap.flutter.map.core.MapController;
 import com.amap.flutter.map.overlays.marker.MarkersController;
 import com.amap.flutter.map.overlays.polygon.PolygonsController;
@@ -50,7 +54,8 @@ public class AMapPlatformView
     private PolylinesController polylinesController;
     private PolygonsController polygonsController;
 
-    private MapView mapView;
+    // [vendored patch] 字段名沿用 mapView，类型为补丁 12 换回的 TextureMapView。
+    private TextureMapView mapView;
 
     // [vendored patch] 留存 Context 供生命周期回调里的面包屑打点/异常可见使用。
     private final Context context;
@@ -71,18 +76,34 @@ public class AMapPlatformView
         myMethodCallHandlerMap = new HashMap<String, MyMethodCallHandler>(8);
 
         try {
-            // [vendored patch] 面包屑打点：MapView 构造窗口（见 BreadcrumbUtil）。
+            // [vendored patch] 面包屑打点：地图视图构造窗口（见 BreadcrumbUtil）。
+            // 步骤 wire 名沿用 java_mapview_*（历史记录与 Dart 展示映射已按此名
+            // 落盘，不因补丁 12 换视图类而改名）。
             BreadcrumbUtil.mark(context, "java_mapview_ctor_start");
-            mapView = new MapView(context, options);
+            mapView = new TextureMapView(context, options);
             BreadcrumbUtil.mark(context, "java_mapview_ctor_done");
             AMap amap = mapView.getMap();
             BreadcrumbUtil.mark(context, "java_getmap_done");
+            // [vendored patch] 渲染段打点（补丁 12）：附加一个只打点的
+            // OnMapLoadedListener。MapController 自身以 addOnMapLoadedListener
+            // 注册，附加不冲突、不改变既有就绪流程；触发即证明首帧渲染与
+            // 瓦片加载链已跑通（死在渲染启动段时此步不会出现）。
+            amap.addOnMapLoadedListener(new AMap.OnMapLoadedListener() {
+                @Override
+                public void onMapLoaded() {
+                    BreadcrumbUtil.mark(context, "java_map_loaded");
+                }
+            });
             mapController = new MapController(methodChannel, mapView);
             markersController = new MarkersController(methodChannel, amap);
             polylinesController = new PolylinesController(methodChannel, amap);
             polygonsController = new PolygonsController(methodChannel, amap);
             initMyMethodCallHandlerMap();
             lifecycleProvider.getLifecycle().addObserver(this);
+            // [vendored patch] 渲染段打点（补丁 12）：平台视图构造器末尾，
+            // 与 java_mapview_ctor_done（仅 new 视图完成）区分——两者之间还隔
+            // 着 getMap 与四个 controller 的初始化。
+            BreadcrumbUtil.mark(context, "java_ctor_done");
         } catch (Throwable e) {
             LogUtil.e(CLASS_NAME, "<init>", e);
             // [vendored patch] 异常可见：构造期被吞掉的 Java 异常（如 .so 加载
@@ -161,7 +182,7 @@ public class AMapPlatformView
             }
             if (null != mapView) {
                 mapView.onCreate(null);
-                // [vendored patch] 面包屑打点：MapView.onCreate 完成。
+                // [vendored patch] 面包屑打点：地图视图 onCreate 完成。
                 BreadcrumbUtil.mark(context, "java_oncreate_done");
             }
         } catch (Throwable e) {
@@ -184,10 +205,18 @@ public class AMapPlatformView
                 return;
             }
             if (null != mapView) {
+                // [vendored patch] 渲染段打点（补丁 12）：onResume 前后夹住
+                // 地图视图的渲染启动调用——v0.2.5 的死亡窗口正在 onCreate
+                // 之后、渲染起来之前，这对步骤用来确认死点是否已越过此处。
+                BreadcrumbUtil.mark(context, "java_onresume_start");
                 mapView.onResume();
+                BreadcrumbUtil.mark(context, "java_onresume_done");
             }
         } catch (Throwable e) {
             LogUtil.e(CLASS_NAME, "onResume", e);
+            // [vendored patch] 异常可见（见 BreadcrumbUtil；与 onCreate 一致，
+            // 此前 onResume 的 catch 只记 LogUtil，补齐）。
+            BreadcrumbUtil.error(context, e);
         }
     }
 

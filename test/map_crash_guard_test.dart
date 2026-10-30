@@ -44,6 +44,12 @@ void main() {
       expect(MapBreadcrumb.decode('java_apikey_done|1')?.label, '原生：Key 注入完成');
       expect(MapBreadcrumb.decode('java_getmap_done|1')?.label, '原生：地图实例取得');
       expect(MapBreadcrumb.decode('java_oncreate_done|1')?.label, '原生：地图 onCreate 完成');
+      // 渲染段步骤（v0.2.6 补丁 12 新增）：构造末尾 / onResume 前后 / 就绪 / 加载完成。
+      expect(MapBreadcrumb.decode('java_ctor_done|1')?.label, '原生：平台视图构造完成');
+      expect(MapBreadcrumb.decode('java_onresume_start|1')?.label, '原生：地图 onResume 开始');
+      expect(MapBreadcrumb.decode('java_onresume_done|1')?.label, '原生：地图 onResume 完成');
+      expect(MapBreadcrumb.decode('java_map_ready|1')?.label, '原生：地图就绪');
+      expect(MapBreadcrumb.decode('java_map_loaded|1')?.label, '原生：地图加载完成');
     });
 
     test('Java 异常行：java_error:<类名> 展示为「原生异常：<类名>」', () {
