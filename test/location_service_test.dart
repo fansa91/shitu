@@ -4,6 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:geolocator/geolocator.dart';
 
 import 'package:shitu/models/geo_point.dart';
+import 'package:shitu/models/located_fix.dart';
+import 'package:shitu/services/location_runtime_status.dart';
 import 'package:shitu/services/location_service.dart';
 import 'package:shitu/utils/coord.dart';
 
@@ -101,6 +103,35 @@ void main() {
           wgs84ToGcj02(const GeoPoint(latitude: 39.9042, longitude: 116.4074));
       expect(point.latitude, closeTo(expected.latitude, 1e-9));
       expect(point.longitude, closeTo(expected.longitude, 1e-9));
+    });
+
+    test('系统结果带精度/方向，并写入运行时状态（设置页精度行）', () async {
+      final status = LocationRuntimeStatus();
+      final service = LocationService(
+        status: status,
+        isServiceEnabled: () async => true,
+        checkPermission: () async => LocationPermission.whileInUse,
+        requestPermission: () async => LocationPermission.whileInUse,
+        fetchPosition: () async => Position(
+          latitude: 39.9042,
+          longitude: 116.4074,
+          timestamp: DateTime(2026, 10, 29),
+          accuracy: 7.5,
+          altitude: 0,
+          altitudeAccuracy: 0,
+          heading: 200,
+          headingAccuracy: 0,
+          speed: 3,
+          speedAccuracy: 0,
+        ),
+        positionStream: () => const Stream.empty(),
+      );
+      final fix = await service.currentFix();
+      expect(fix.accuracyMeters, 7.5);
+      expect(fix.bearingDegrees, 200);
+      expect(status.lastAccuracyMeters, 7.5);
+      expect(status.lastFixSource, LocationSource.system);
+      expect(status.activeSource, LocationSource.system);
     });
 
     test('取位置超时 → timeout 中文提示', () async {

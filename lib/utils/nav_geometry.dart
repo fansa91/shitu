@@ -185,6 +185,147 @@ double _bearing(GeoPoint from, GeoPoint to) {
   return math.atan2(dx, dy); // 0 = 正北，顺时针为正
 }
 
+/// 两点方位角（度，0=正北、顺时针，[0, 360)）。
+double bearingDegrees(GeoPoint from, GeoPoint to) =>
+    normalizeBearingDegrees(_bearing(from, to) / _degToRad);
+
+/// 把任意角度正规化到 [0, 360)。
+double normalizeBearingDegrees(double degrees) {
+  final r = degrees % 360;
+  return r < 0 ? r + 360 : r;
+}
+
+/// 从 [from] 转到 [to] 的最短弧带符号角差（度，(-180, 180]，
+/// 正 = 顺时针）。
+double shortestArcDeltaDegrees(double from, double to) {
+  var delta = normalizeBearingDegrees(to) - normalizeBearingDegrees(from);
+  if (delta > 180) delta -= 360;
+  if (delta < -180) delta += 360;
+  return delta;
+}
+
+/// 从 [current] 向 [target] 沿最短弧步进，单步转角不超过
+/// [maxDeltaDegrees]（旋转限速的纯函数内核，供单测）。
+double stepBearingDegrees(
+  double current,
+  double target,
+  double maxDeltaDegrees,
+) {
+  final delta = shortestArcDeltaDegrees(current, target);
+  final limit = maxDeltaDegrees.abs();
+  final stepped = delta.abs() <= limit
+      ? target
+      : current + limit * delta.sign;
+  return normalizeBearingDegrees(stepped);
+}
+
+/// 取折线沿线 [fromAlong]→[toAlong] 米之间的子折线（含两端插值点
+/// 与中间全部顶点）。导航「只画当前路段剩余部分」用它裁剪：
+/// fromAlong 取当前位置投影，toAlong 取下一机动点/终点。
+List<GeoPoint> subPolyline(
+  List<GeoPoint> points,
+  List<double> cumulative,
+  double fromAlong,
+  double toAlong,
+) {
+  if (points.isEmpty) return const [];
+  if (points.length == 1 || cumulative.length != points.length) {
+    return List.of(points);
+  }
+  final total = cumulative.last;
+  final from = fromAlong.clamp(0.0, total);
+  final to = toAlong.clamp(from, total);
+  final result = <GeoPoint>[pointAtDistance(points, cumulative, from)];
+  for (var i = 0; i < points.length; i++) {
+    if (cumulative[i] > from && cumulative[i] < to) result.add(points[i]);
+  }
+  final end = pointAtDistance(points, cumulative, to);
+  if (result.last != end) result.add(end);
+  return result;
+}
+
+/// 行进方向跟踪器（确定性状态逻辑，供单测）：把每一帧的原始
+/// 方向输入收敛成平滑朝向，供导航页旋转地图（车头朝上）。
+///
+/// 目标方向的取值优先级：
+/// 1. 定位自带 bearing——仅当速度 ≥ [minBearingSpeedMps] 时可信
+///    （静止时 bearing 是噪声）；
+/// 2. 位移方位：与锚点拉开 ≥ [minDisplacementMeters] 后由两点算出
+///    （锚点随用随换，保证每次用的都是「走出来的」方向）；
+/// 3. 路线方向（调用方按当前沿线距离取前方路段方位传入）。
+///
+/// 平滑：朝向以 [maxTurnRateDegPerSec] 度/秒为上限沿最短弧追赶
+/// 目标，避免 GPS 抖动甩图；长时间无更新（dt 大）时允许直接对齐。
+class HeadingTracker {
+  HeadingTracker({
+    this.maxTurnRateDegPerSec = 120,
+    this.minDisplacementMeters = 4,
+    this.minBearingSpeedMps = 1.0,
+  });
+
+  /// 最大转速（度/秒）。
+  final double maxTurnRateDegPerSec;
+
+  /// 位移方位的最小位移（米）：小于此值不更新方向，防止静止漂移。
+  final double minDisplacementMeters;
+
+  /// 定位 bearing 可信的最低速度（米/秒）。
+  final double minBearingSpeedMps;
+
+  double? _current;
+  GeoPoint? _anchor;
+  DateTime? _lastAt;
+
+  /// 当前平滑朝向（度，[0, 360)）；尚无任何可用方向时为 null。
+  double? get current => _current;
+
+  void reset() {
+    _current = null;
+    _anchor = null;
+    _lastAt = null;
+  }
+
+  /// 喂入一帧，返回更新后的平滑朝向（可能仍为 null）。
+  /// [routeBearingDegrees] 为路线在当前位置前方的方位（可空）。
+  double? update({
+    required GeoPoint point,
+    double? fixBearingDegrees,
+    double? speedMps,
+    double? routeBearingDegrees,
+    required DateTime now,
+  }) {
+    final dtSeconds = _lastAt == null
+        ? 1.0
+        : now.difference(_lastAt!).inMilliseconds / 1000.0;
+    _lastAt = now;
+    _anchor ??= point;
+
+    double? target;
+    if (fixBearingDegrees != null &&
+        (speedMps == null || speedMps >= minBearingSpeedMps)) {
+      target = normalizeBearingDegrees(fixBearingDegrees);
+    }
+    if (target == null &&
+        haversineMeters(_anchor!, point) >= minDisplacementMeters) {
+      target = bearingDegrees(_anchor!, point);
+      _anchor = point;
+    }
+    target ??= routeBearingDegrees == null
+        ? null
+        : normalizeBearingDegrees(routeBearingDegrees);
+
+    if (target == null) return _current;
+    if (_current == null) {
+      _current = target;
+    } else {
+      // dt 过长（如暂停后恢复）时上限放宽到整圈，等于直接对齐。
+      final maxDelta = math.min(180.0, maxTurnRateDegPerSec * dtSeconds);
+      _current = stepBearingDegrees(_current!, target, maxDelta);
+    }
+    return _current;
+  }
+}
+
 TurnDirection _directionFor(double deltaRad) {
   final deg = deltaRad / _degToRad;
   final abs = deg.abs();

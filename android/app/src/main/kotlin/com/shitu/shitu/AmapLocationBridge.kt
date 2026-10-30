@@ -158,6 +158,15 @@ class AmapLocationBridge(messenger: BinaryMessenger, private val appContext: Con
         option.setNeedAddress(false)
         option.setMockEnable(false)
         option.setHttpTimeOut(10_000)
+        // 坐标偏移保持开启（默认值，此处显式写明防误改）：返回
+        // GCJ-02 偏移坐标；关掉返回原始 WGS-84，国内底图上
+        // 反而偏数百米。
+        option.setOffset(true)
+        // 高精度模式下优先等卫星定位收敛（上限 10 秒，超时回融合
+        // 结果），争取室外米级精度。setGpsFirst/setGpsFirstTimeout/
+        // setOffset 均已按 6.5.1 官方 jar 的类签名核实存在。
+        option.setGpsFirst(true)
+        option.setGpsFirstTimeout(10_000)
         return option
     }
 
@@ -169,6 +178,9 @@ class AmapLocationBridge(messenger: BinaryMessenger, private val appContext: Con
         option.setNeedAddress(false)
         option.setMockEnable(false)
         option.setHttpTimeOut(10_000)
+        option.setOffset(true)
+        option.setGpsFirst(true)
+        option.setGpsFirstTimeout(10_000)
         return option
     }
 
@@ -177,6 +189,7 @@ class AmapLocationBridge(messenger: BinaryMessenger, private val appContext: Con
         "longitude" to longitude,
         "accuracy" to accuracy.toDouble(),
         "speed" to speed.toDouble(),
+        "bearing" to bearing.toDouble(),
         "timeMillis" to time,
         "errorCode" to errorCode,
         "errorInfo" to (errorInfo ?: ""),

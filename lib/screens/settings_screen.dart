@@ -429,12 +429,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         builder: (context, _) {
                           final status = LocationRuntimeStatus.instance;
                           final active = status.activeSource;
-                          return Text(
-                            active == null
-                                ? '当前生效定位源：尚未定位'
-                                : '当前生效定位源：${active.label}'
-                                      '${status.note == null ? '' : '（${status.note}）'}',
-                            style: const TextStyle(fontSize: 12.5),
+                          final accuracy = status.lastAccuracyMeters;
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                active == null
+                                    ? '当前生效定位源：尚未定位'
+                                    : '当前生效定位源：${active.label}'
+                                          '${status.note == null ? '' : '（${status.note}）'}',
+                                style: const TextStyle(fontSize: 12.5),
+                              ),
+                              if (accuracy != null)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 2),
+                                  child: Text(
+                                    '最近一次定位精度：±${accuracy.toStringAsFixed(0)} 米'
+                                    '（来源：${status.lastFixSource?.label ?? '—'}）',
+                                    style: const TextStyle(fontSize: 12.5),
+                                  ),
+                                ),
+                            ],
                           );
                         },
                       ),

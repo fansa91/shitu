@@ -58,6 +58,7 @@ class TileMapView extends StatefulWidget {
     super.key,
     this.selectedPoi,
     this.selectedRoutePoints = const [],
+    this.routeOutlinePoints = const [],
     this.alternativeRoutePoints = const [],
     this.trafficEnabled = false,
     this.baseStyle = MapBaseStyle.standard,
@@ -70,6 +71,10 @@ class TileMapView extends StatefulWidget {
 
   final Poi? selectedPoi;
   final List<GeoPoint> selectedRoutePoints;
+
+  /// 导航态全程剩余轮廓（极淡色，画在高亮当前路段之下）；
+  /// 非空 = 导航渲染模式（见 AppMap 同名参数说明）。
+  final List<GeoPoint> routeOutlinePoints;
   final List<GeoPoint> alternativeRoutePoints;
   final bool trafficEnabled;
   final MapBaseStyle baseStyle;
@@ -144,10 +149,18 @@ class _TileMapViewState extends State<TileMapView> {
     _controller.move(_toLatLng(target), zoom ?? _controller.camera.zoom);
   }
 
+  /// 朝向旋转：flutter_map 的 rotation 是「地图内容顺时针旋转角」，
+  /// 要让方向 h 朝上，内容需逆时针转 h，即 rotate(-h)；
+  /// null 恢复北朝上（rotation 归 0）。
+  void _handlePointUp(double? headingDegrees) {
+    _controller.rotate(headingDegrees == null ? 0 : -headingDegrees);
+  }
+
   void _onMapReady() {
     _ready = true;
     widget.handle?.attach(
       move: _handleMove,
+      pointUp: _handlePointUp,
       zoomIn: () => _controller.move(
         _controller.camera.center,
         _controller.camera.zoom + 1,
@@ -212,9 +225,19 @@ class _TileMapViewState extends State<TileMapView> {
           children: [
             ..._tileLayers(),
             if (widget.alternativeRoutePoints.length > 1 ||
+                widget.routeOutlinePoints.length > 1 ||
                 widget.selectedRoutePoints.length > 1)
               PolylineLayer(
                 polylines: [
+                  if (widget.routeOutlinePoints.length > 1)
+                    Polyline(
+                      points: widget.routeOutlinePoints
+                          .map(_toLatLng)
+                          .toList(),
+                      // 极淡轮廓：只表达「全程还剩多少」，不抢当前段。
+                      color: const Color(0x551A73E8),
+                      strokeWidth: 5,
+                    ),
                   if (widget.alternativeRoutePoints.length > 1)
                     Polyline(
                       points: widget.alternativeRoutePoints
@@ -311,8 +334,11 @@ class _TileMapViewState extends State<TileMapView> {
   }
 
   List<Marker> _buildMarkers() {
+    // 导航渲染模式：起点绿点抑制（当前位置点已在该处），终点针
+    // 取轮廓末点（= 真终点，而不是当前路段的末端）。
+    final navMode = widget.routeOutlinePoints.isNotEmpty;
     return [
-      if (widget.selectedRoutePoints.isNotEmpty)
+      if (!navMode && widget.selectedRoutePoints.isNotEmpty)
         Marker(
           point: _toLatLng(widget.selectedRoutePoints.first),
           width: 18,
@@ -321,7 +347,11 @@ class _TileMapViewState extends State<TileMapView> {
         ),
       if (widget.selectedRoutePoints.isNotEmpty)
         Marker(
-          point: _toLatLng(widget.selectedRoutePoints.last),
+          point: _toLatLng(
+            navMode
+                ? widget.routeOutlinePoints.last
+                : widget.selectedRoutePoints.last,
+          ),
           width: 36,
           height: 36,
           alignment: Alignment.bottomCenter,

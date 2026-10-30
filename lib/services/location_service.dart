@@ -277,8 +277,17 @@ class LocationService {
     point: _toGcj02(p),
     at: p.timestamp,
     speedMps: p.speed >= 0 ? p.speed : null,
+    accuracyMeters: p.accuracy > 0 ? p.accuracy : null,
+    // geolocator 的 heading 为负表示设备未提供方向。
+    bearingDegrees: p.heading >= 0 ? p.heading : null,
     source: LocationSource.system,
   );
+
+  /// 出结果统一走这里：记最近一次精度/来源到运行时状态（设置页展示）。
+  LocatedFix _track(LocatedFix fix) {
+    _status.reportLastFix(fix);
+    return fix;
+  }
 
   String _describeAmapError(Object e) {
     if (e is AmapLocationException) return e.info;
@@ -313,7 +322,7 @@ class LocationService {
       } else {
         _status.reportSuccess(LocationSource.system);
       }
-      return fix;
+      return _track(fix);
     }
     // —— 高德路径 ——
     if (!await _guard.tryBegin()) {
@@ -326,14 +335,14 @@ class LocationService {
       }
       final fix = await _fetchSystemFix();
       _status.reportFallback('高德定位已被守卫跳过，当前用系统定位');
-      return fix;
+      return _track(fix);
     }
     try {
       await _amap.init(apiKey: config.sdkKey);
       final raw = await _amap.fetchOnce().timeout(amapFirstFixTimeout);
       await _guard.markSuccess();
       _status.reportSuccess(LocationSource.amap);
-      return raw.toFix();
+      return _track(raw.toFix());
     } catch (e) {
       if (config.mode == LocationSourceMode.amap) {
         throw LocationException(
@@ -343,7 +352,7 @@ class LocationService {
       }
       final fix = await _fetchSystemFix();
       _status.reportFallback('高德定位失败，已自动改用系统定位');
-      return fix;
+      return _track(fix);
     }
   }
 
@@ -391,7 +400,7 @@ class LocationService {
     if (decision.hardError != null) throw decision.hardError!;
     if (!decision.useAmap) {
       if (decision.note != null) _status.reportFallback(decision.note!);
-      yield* _systemRawStream().map(_systemFix);
+      yield* _systemRawStream().map((p) => _track(_systemFix(p)));
       return;
     }
     if (!await _guard.tryBegin()) {
@@ -402,7 +411,7 @@ class LocationService {
         );
       }
       _status.reportFallback('高德定位已被守卫跳过，当前用系统定位');
-      yield* _systemRawStream().map(_systemFix);
+      yield* _systemRawStream().map((p) => _track(_systemFix(p)));
       return;
     }
     try {
@@ -415,7 +424,7 @@ class LocationService {
         );
       }
       _status.reportFallback('高德定位初始化失败，已自动改用系统定位');
-      yield* _systemRawStream().map(_systemFix);
+      yield* _systemRawStream().map((p) => _track(_systemFix(p)));
       return;
     }
 
@@ -432,13 +441,13 @@ class LocationService {
           await _guard.markSuccess();
           _status.reportSuccess(LocationSource.amap);
         }
-        yield raw.toFix();
+        yield _track(raw.toFix());
       }
     } catch (e) {
       if (!locked && config.mode == LocationSourceMode.auto) {
         await _amap.stop();
         _status.reportFallback('高德定位失败，已自动改用系统定位');
-        yield* _systemRawStream().map(_systemFix);
+        yield* _systemRawStream().map((p) => _track(_systemFix(p)));
         return;
       }
       if (e is AmapLocationException) {

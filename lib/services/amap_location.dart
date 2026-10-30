@@ -13,6 +13,7 @@ class AmapRawFix {
     required this.at,
     this.accuracyMeters,
     this.speedMps,
+    this.bearingDegrees,
   });
 
   /// 位置（GCJ-02，高德定位原生输出）。
@@ -27,10 +28,15 @@ class AmapRawFix {
   /// 速度（米/秒）；原生未提供（-1）时为 null。
   final double? speedMps;
 
+  /// 行进方向（度，0=正北、顺时针）；原生未提供时为 null。
+  final double? bearingDegrees;
+
   LocatedFix toFix() => LocatedFix(
     point: point,
     at: at,
     speedMps: speedMps,
+    accuracyMeters: accuracyMeters,
+    bearingDegrees: bearingDegrees,
     source: LocationSource.amap,
   );
 }
@@ -62,6 +68,7 @@ AmapRawFix parseAmapFix(Map<Object?, Object?> raw) {
   }
   final accuracy = (raw['accuracy'] as num?)?.toDouble();
   final speed = (raw['speed'] as num?)?.toDouble();
+  final bearing = (raw['bearing'] as num?)?.toDouble();
   final timeMillis = (raw['timeMillis'] as num?)?.toInt();
   return AmapRawFix(
     point: GeoPoint(latitude: lat, longitude: lng),
@@ -70,6 +77,7 @@ AmapRawFix parseAmapFix(Map<Object?, Object?> raw) {
         : DateTime.fromMillisecondsSinceEpoch(timeMillis),
     accuracyMeters: (accuracy != null && accuracy > 0) ? accuracy : null,
     speedMps: (speed != null && speed >= 0) ? speed : null,
+    bearingDegrees: bearing,
   );
 }
 

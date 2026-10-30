@@ -20,6 +20,13 @@ import '../widgets/app_map.dart';
 /// 导航页：深色沉浸式。接 [NavigationController] 的真实状态：
 /// 顶部指引横幅（下一步转向 + 距离 + 文案）、速度气泡（GPS 实测速度，
 /// 不显示假限速）、偏航重规划条、底部 ETA 条、到达/结束行程小结。
+///
+/// 地图侧（本批）：跟随相机默认锁定当前位置；朝向默认「方向」模式
+/// （车头朝上，地图按 [HeadingTracker] 平滑后的行进方向旋转），
+/// 可切「北朝上」；路线只高亮当前路段剩余部分，全程剩余以极淡
+/// 轮廓呈现；用户手动拖图按 [FollowLock] 规则解除跟随，点跟随/
+/// 朝向按钮重新锁定。旋转只活在本页的地图实例里，退出导航后
+/// 其它页面仍是北朝上。
 class NavigationScreen extends StatefulWidget {
   const NavigationScreen({
     super.key,
@@ -67,6 +74,19 @@ class _NavigationScreenState extends State<NavigationScreen> {
   bool _rerouting = false;
   RouteOption? _rerouteCandidate;
 
+  // 跟随相机与朝向（方向导航）
+  final _mapHandle = MapHandle();
+  final _followLock = FollowLock()..lock();
+  final _headingTracker = HeadingTracker();
+
+  /// 朝向模式：true = 方向朝上（车头朝上，默认）；false = 北朝上。
+  bool _headingUp = true;
+
+  /// 路线方向兜底用的累计距离缓存（按当前方案对象缓存，
+  /// 换路线（重规划）时凭 identical 失效重算）。
+  RouteOption? _headingOption;
+  List<double>? _headingCumulative;
+
   String get _voiceLabel =>
       widget.settings.ttsEngine == TtsEngine.nvidia ? '语音 · 英伟达' : '语音 · 系统';
 
@@ -83,6 +103,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
       initialOption: widget.option,
       originName: widget.originName,
       destinationName: widget.destinationName,
+      mode: widget.mode,
       onAnnounce: (text) {
         if (_muted) return;
         // 播报失败（如无可用引擎）只提示一次，不再静默无声。
@@ -146,6 +167,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
   void _onNavChanged() {
     if (!mounted) return;
     setState(() {});
+    _updateFollowCamera();
     if (_nav.arrived && !_summaryShown) {
       _summaryShown = true;
       _finishFlow();
@@ -153,6 +175,58 @@ class _NavigationScreenState extends State<NavigationScreen> {
     if (_nav.rerouteSuggested && _rerouteCandidate == null && !_rerouting) {
       _computeReroute();
     }
+  }
+
+  /// 跟随相机：锁定中且已有定位时，把相机贴到当前位置并按朝向
+  /// 模式旋转。方向来源与限速平滑在 [HeadingTracker]（定位
+  /// bearing → 位移方位 → 路线方向），这里只负责命令下发：
+  /// 瓦片/原生的旋转语义翻译在 MapHandle.pointUp 的实现侧。
+  void _updateFollowCamera() {
+    if (!_followLock.following || _nav.arrived) return;
+    final fix = _nav.lastFix;
+    if (fix == null) return;
+    _mapHandle.moveCamera(fix.point, zoom: 17.5);
+    final heading = _headingTracker.update(
+      point: fix.point,
+      fixBearingDegrees: fix.bearingDegrees,
+      speedMps: fix.speedMps,
+      routeBearingDegrees: _routeBearingAhead(),
+      now: fix.at,
+    );
+    _mapHandle.pointUp(_headingUp ? heading : null);
+  }
+
+  /// 路线在当前进度前方约 40 米处的方位（方向兜底来源：
+  /// 无定位 bearing 且位移不足时，让地图至少沿着路线转）。
+  double? _routeBearingAhead() {
+    final points = _nav.option.points;
+    if (points.length < 2) return null;
+    if (!identical(_headingOption, _nav.option)) {
+      _headingOption = _nav.option;
+      _headingCumulative = cumulativeDistances(points);
+    }
+    final cum = _headingCumulative!;
+    final from = pointAtDistance(points, cum, _nav.distanceAlongMeters);
+    final to = pointAtDistance(points, cum, _nav.distanceAlongMeters + 40);
+    if (from == to) return null;
+    return bearingDegrees(from, to);
+  }
+
+  /// 用户手动拖/转地图：按 FollowLock 既有规则解除跟随。
+  void _onUserDraggedMap() => _followLock.unlockByUserGesture();
+
+  /// 切换朝向模式并重新锁定跟随（立即按新模式贴相机）。
+  void _toggleHeadingUp() {
+    setState(() => _headingUp = !_headingUp);
+    _followLock.lock();
+    _updateFollowCamera();
+  }
+
+  /// 重新锁定跟随（用户拖走地图后出现「跟随」按钮）。
+  void _relockFollow() {
+    _followLock.lock();
+    _updateFollowCamera();
+    setState(() {});
   }
 
   Future<void> _computeReroute() async {
@@ -331,6 +405,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
     final next = _nav.nextManeuver;
     final distToNext = _nav.distanceToNextManeuver;
     final speed = _nav.currentSpeedKmh;
+    final segment = _nav.currentSegmentPoints;
     return Scaffold(
       backgroundColor: const Color(0xFF101826),
       body: Stack(
@@ -339,9 +414,18 @@ class _NavigationScreenState extends State<NavigationScreen> {
             child: AppMap(
               settings: widget.settings,
               dark: true,
-              selectedRoutePoints: _nav.option.points,
+              // 导航态：高亮当前路段剩余 + 极淡全程剩余轮廓；
+              // 尚未拿到首个定位时退回整条路线（规划态观感）。
+              selectedRoutePoints: segment.isNotEmpty
+                  ? segment
+                  : _nav.option.points,
+              routeOutlinePoints: segment.isNotEmpty
+                  ? _nav.remainingRoutePoints
+                  : const [],
+              handle: _mapHandle,
               myLocation: _nav.currentPoint,
               showLocationDot: _nav.currentPoint == null,
+              onUserDragged: _onUserDraggedMap,
             ),
           ),
           // 顶部指引横幅
@@ -494,6 +578,28 @@ class _NavigationScreenState extends State<NavigationScreen> {
               ),
             ),
           ),
+          // 朝向切换（方向朝上/北朝上）与跟随重锁：右侧与速度气泡同高。
+          Positioned(
+            right: 14,
+            top: 250,
+            child: Column(
+              children: [
+                _roundMapButton(
+                  icon: _headingUp ? Icons.navigation : Icons.explore,
+                  label: _headingUp ? '方向' : '北',
+                  onTap: _toggleHeadingUp,
+                ),
+                if (!_followLock.following) ...[
+                  const SizedBox(height: 10),
+                  _roundMapButton(
+                    icon: Icons.my_location,
+                    label: '跟随',
+                    onTap: _relockFollow,
+                  ),
+                ],
+              ],
+            ),
+          ),
           // 底部信息条
           Positioned(
             left: 0,
@@ -546,6 +652,37 @@ class _NavigationScreenState extends State<NavigationScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 地图上的圆形小按钮（朝向切换 / 跟随重锁）。
+  Widget _roundMapButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.white,
+      shape: const CircleBorder(),
+      elevation: 2,
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: SizedBox(
+          width: 52,
+          height: 52,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 20, color: const Color(0xFF17233B)),
+              Text(
+                label,
+                style: const TextStyle(fontSize: 9, color: Color(0xFF17233B)),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

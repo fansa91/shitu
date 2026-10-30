@@ -147,4 +147,105 @@ void main() {
     // 有折线时剩余距离以折线实长为准（a→b 约 1027 米）。
     expect(nav.remainingMeters, closeTo(haversineMeters(a, b), 30));
   });
+
+  test('门控：越过机动点后不抢播「下一步」，下一机动点进圈才播', () {
+    // 双机动点路线：东→北→东，b 处左转、c 处右转。
+    const d = GeoPoint(latitude: 22.5500, longitude: 114.0700);
+    const line2 = [a, b, c, d];
+    final cum2 = cumulativeDistances(line2);
+    final bcLen = haversineMeters(b, c);
+    final option2 = RouteOption(
+      durationSeconds: (polylineLength(line2) / 10).round(),
+      distanceMeters: polylineLength(line2),
+      tollYuan: 0,
+      trafficLights: 0,
+      strategyTags: const ['推荐路线'],
+      provider: MapProvider.amap,
+      recommended: true,
+      points: line2,
+      steps: const ['从起点出发', '左转进入中山路', '右转进入人民路', '到达目的地'],
+    );
+    final nav2 = NavigationController(
+      initialOption: option2,
+      originName: '起点',
+      destinationName: '终点',
+      onAnnounce: spoken.add,
+    );
+    addTearDown(nav2.dispose);
+    LocatedFix fix2(double along) {
+      final p = pointAtDistance(line2, cum2, along);
+      return LocatedFix(point: p, at: DateTime.now(), speedMps: 10);
+    }
+
+    nav2.start();
+    nav2.updatePosition(fix2(abLen - 250));
+    expect(spoken, contains('前方 300 米，左转进入中山路'));
+    // 越过 b（+30 米）：断言没有任何「下一步」抢播，
+    // 也没有右转机动点的任何播报（距它还有约 bcLen-30 米）。
+    nav2.updatePosition(fix2(abLen + 30));
+    expect(spoken.where((t) => t.contains('下一步')), isEmpty);
+    expect(spoken.where((t) => t.contains('人民路')), isEmpty);
+    // 接近 c 到 250 米：这才轮到它预告。
+    nav2.updatePosition(fix2(abLen + bcLen - 250));
+    expect(spoken, contains('前方 300 米，右转进入人民路'));
+  });
+
+  test('执行段：跨级跳进 30 米只播执行段，不回补早段', () {
+    nav.start();
+    nav.updatePosition(fixAt(abLen - 25));
+    expect(spoken, contains('前方 30 米，左转进入中山路'));
+    expect(spoken.where((t) => t.contains('前方 300 米')), isEmpty);
+    expect(spoken.where((t) => t.contains('前方 100 米')), isEmpty);
+    final count = spoken.length;
+    nav.updatePosition(fixAt(abLen - 10));
+    expect(spoken.length, count);
+  });
+
+  test('步行模式用 60/25/10 米阈值', () {
+    final spokenWalk = <String>[];
+    final navWalk = NavigationController(
+      initialOption: makeOption(),
+      originName: '起点',
+      destinationName: '终点',
+      mode: TransportMode.walking,
+      onAnnounce: spokenWalk.add,
+    );
+    addTearDown(navWalk.dispose);
+    navWalk.start();
+    navWalk.updatePosition(fixAt(abLen - 50));
+    expect(spokenWalk, contains('前方 60 米，左转进入中山路'));
+    navWalk.updatePosition(fixAt(abLen - 20));
+    expect(spokenWalk, contains('前方 25 米，左转进入中山路'));
+    navWalk.updatePosition(fixAt(abLen - 5));
+    expect(spokenWalk, contains('前方 10 米，左转进入中山路'));
+  });
+
+  test('重规划后播报状态机重置：同一机动点可重新预告', () {
+    nav.start();
+    nav.updatePosition(fixAt(abLen - 250));
+    expect(spoken.where((t) => t == '前方 300 米，左转进入中山路').length, 1);
+    nav.replaceRoute(makeOption());
+    nav.updatePosition(fixAt(abLen - 250));
+    expect(spoken.where((t) => t == '前方 300 米，左转进入中山路').length, 2);
+  });
+
+  test('当前路段裁剪：只含投影点到下一机动点，全程剩余到终点', () {
+    expect(nav.currentSegmentPoints, isEmpty);
+    expect(nav.remainingRoutePoints, isEmpty);
+    nav.start();
+    nav.updatePosition(fixAt(abLen / 2));
+    final segment = nav.currentSegmentPoints;
+    expect(segment.length, greaterThanOrEqualTo(2));
+    expect(
+      projectOntoPolyline(segment.first, line).distanceAlongMeters,
+      closeTo(abLen / 2, 5),
+    );
+    expect(segment.last, b); // 当前段终点 = 下一机动点顶点
+    final remaining = nav.remainingRoutePoints;
+    expect(remaining.last, c); // 全程剩余直达终点
+    // 越过 b 后当前段切换为 b→c，终点为目的地。
+    nav.updatePosition(fixAt(abLen + haversineMeters(b, c) / 2));
+    expect(nav.currentSegmentPoints.last, c);
+    expect(nav.remainingRoutePoints.last, c);
+  });
 }

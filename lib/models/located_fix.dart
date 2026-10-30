@@ -37,6 +37,8 @@ class LocatedFix {
     required this.point,
     required this.at,
     this.speedMps,
+    this.accuracyMeters,
+    this.bearingDegrees,
     this.source = LocationSource.system,
   });
 
@@ -51,6 +53,15 @@ class LocatedFix {
 
   /// GPS 速度（米/秒）；设备未提供时为 null（负值按未提供处理）。
   final double? speedMps;
+
+  /// 精度半径（米）：位置大致落在这个圆内；后端未提供时为 null。
+  /// 设置页据此向用户展示最近一次定位的精度量级。
+  final double? accuracyMeters;
+
+  /// 行进方向（度，0=正北、顺时针，正规化由消费方做）；
+  /// 后端未提供时为 null。静止时该值不可靠，方向导航的取值
+  /// 优先级与门控见 utils/nav_geometry.dart 的 HeadingTracker。
+  final double? bearingDegrees;
 
   /// 速度（km/h），无速度时为 null。
   double? get speedKmh =>

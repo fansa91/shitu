@@ -2,9 +2,11 @@ import 'package:flutter/foundation.dart';
 
 import '../models/geo_point.dart';
 import '../models/located_fix.dart';
+import '../models/map_provider.dart';
 import '../models/nav_track.dart';
 import '../models/route_plan.dart';
 import '../utils/nav_geometry.dart';
+import 'nav_announcer.dart';
 
 /// 导航结束时的小结数据（里程/用时取自实走轨迹）。
 class NavSummary {
@@ -24,24 +26,33 @@ class NavSummary {
 /// 轻量跟随导航状态机（纯逻辑 + ChangeNotifier，UI 与播报都挂在它上面）。
 ///
 /// 输入：选中的 [RouteOption]（折线 + 分步文案）与 [LocatedFix] 位置流。
-/// 职责：步骤推进（按折线几何提取的转向点）、分级播报（出发 / 300m / 100m /
-/// 下一步 / 到达，同一节点只播一次）、剩余距离与 ETA、偏航判定
+/// 职责：步骤推进（按折线几何提取的转向点）、机动点分段门控播报
+/// （见 [ManeuverAnnouncer]：越过上一机动点才解锁下一个，按距离
+/// 三段递进、每段一次）、剩余距离与 ETA、偏航判定
 /// （离线 >50m 连续两次采样 → 建议重规划；忽略后 60 秒冷却）、轨迹记录。
 class NavigationController extends ChangeNotifier {
   NavigationController({
     required RouteOption initialOption,
     required this.originName,
     required this.destinationName,
+    this.mode = TransportMode.driving,
     void Function(String text)? onAnnounce,
     DateTime Function()? clock,
   })  : _option = initialOption,
         _announce = onAnnounce,
-        _clock = clock ?? DateTime.now {
+        _clock = clock ?? DateTime.now,
+        _announcer = ManeuverAnnouncer(announcementThresholdsFor(mode)) {
     _resetRoute();
   }
 
   final String originName;
   final String destinationName;
+
+  /// 出行方式：决定机动点播报阈值（驾车 300/100/30 米，
+  /// 步行骑行 60/25/10 米）。
+  final TransportMode mode;
+
+  final ManeuverAnnouncer _announcer;
   final void Function(String text)? _announce;
   final DateTime Function() _clock;
 
@@ -73,6 +84,10 @@ class NavigationController extends ChangeNotifier {
 
   bool get started => _started;
   bool get arrived => _arrived;
+
+  /// 最近一次定位采样（含 bearing/速度/精度），导航页方向
+  /// 跟踪取 bearing 用；尚无采样时为 null。
+  LocatedFix? get lastFix => _lastFix;
   GeoPoint? get currentPoint => _lastFix?.point;
   double? get currentSpeedKmh => _lastFix?.speedKmh;
   double get distanceAlongMeters => _distanceAlong;
@@ -103,6 +118,36 @@ class NavigationController extends ChangeNotifier {
     return (m.distanceAlongMeters - _distanceAlong)
         .clamp(0, double.infinity)
         .toDouble();
+  }
+
+  /// 当前路段的剩余折线（导航态地图的高亮层）：从当前位置在
+  /// 路线上的投影点到下一个机动点（无机动点时到终点）。
+  /// 已走过的部分不在其中。未开始/无位置/无折线时为空。
+  List<GeoPoint> get currentSegmentPoints {
+    if (!_started || _lastFix == null || _option.points.length < 2) {
+      return const [];
+    }
+    final endAlong = nextManeuver?.distanceAlongMeters ?? _totalMeters;
+    return subPolyline(
+      _option.points,
+      _cumulative,
+      _distanceAlong,
+      endAlong,
+    );
+  }
+
+  /// 全程剩余折线（投影点 → 终点）：导航态作极淡色轮廓层，
+  /// 让「当前段清晰、全程可感知」。条件同 [currentSegmentPoints]。
+  List<GeoPoint> get remainingRoutePoints {
+    if (!_started || _lastFix == null || _option.points.length < 2) {
+      return const [];
+    }
+    return subPolyline(
+      _option.points,
+      _cumulative,
+      _distanceAlong,
+      _totalMeters,
+    );
   }
 
   bool get rerouteSuggested => _rerouteSuggested;
@@ -176,28 +221,24 @@ class NavigationController extends ChangeNotifier {
   }
 
   void _updateManeuvers() {
-    // 推进已通过的转向点：通过后播报「下一步」。
+    // 推进已通过的转向点（只推进状态、不出声：旧版越过即抢播
+    // 「下一步：…」是用户反馈「还没到路口就播、太早」的根源）。
     while (_currentManeuverIndex < _maneuvers.length &&
         _distanceAlong > _maneuvers[_currentManeuverIndex].distanceAlongMeters + 15) {
-      final passedIndex = _currentManeuverIndex;
       _currentManeuverIndex++;
-      final next = nextManeuver;
-      if (next != null) {
-        _speakOnce(
-          'turn-$passedIndex-passed',
-          '下一步：${next.instruction}',
-        );
-      }
     }
     final m = nextManeuver;
     if (m == null) return;
-    final remaining = m.distanceAlongMeters - _distanceAlong;
-    final idx = _currentManeuverIndex;
-    if (remaining <= 300 && remaining > 100) {
-      _speakOnce('turn-$idx-300', '前方 300 米，${m.instruction}');
-    } else if (remaining <= 100 && remaining > 0) {
-      _speakOnce('turn-$idx-100', '前方 100 米，${m.instruction}');
-    }
+    // 门控状态机只喂「当前下一个」机动点：其下标变化即代表上一
+    // 机动点已越过，新机动点这才解锁、按距离三段递进播报。
+    final text = _announcer.advance(
+      maneuverIndex: _currentManeuverIndex,
+      distanceToManeuverMeters: (m.distanceAlongMeters - _distanceAlong)
+          .clamp(0, double.infinity)
+          .toDouble(),
+      instruction: m.instruction,
+    );
+    if (text != null) _announce?.call(text);
   }
 
   void _updateOffRoute(LocatedFix fix) {
@@ -229,7 +270,7 @@ class NavigationController extends ChangeNotifier {
     _option = newOption;
     _rerouteSuggested = false;
     _rerouteCooldownUntil = null;
-    _spoken.removeWhere((k) => k.startsWith('turn-'));
+    _announcer.reset();
     _resetRoute();
     _speakOnce(
       'rerouted-${_clock().millisecondsSinceEpoch}',

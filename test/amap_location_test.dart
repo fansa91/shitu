@@ -136,6 +136,23 @@ void main() {
       expect(fix.toFix().source, LocationSource.amap);
     });
 
+    test('bearing 解析；精度/方向经 toFix 透传到 LocatedFix', () {
+      final fix = parseAmapFix({
+        'latitude': 39.908722,
+        'longitude': 116.397499,
+        'accuracy': 18.0,
+        'speed': 1.5,
+        'bearing': 123.0,
+        'timeMillis': 1793000000000,
+        'errorCode': 0,
+        'errorInfo': '',
+      });
+      expect(fix.bearingDegrees, 123);
+      final located = fix.toFix();
+      expect(located.accuracyMeters, 18);
+      expect(located.bearingDegrees, 123);
+    });
+
     test('错误码非 0 → 抛 AmapLocationException 带原生码与信息', () {
       expect(
         () => parseAmapFix({

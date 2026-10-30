@@ -38,6 +38,7 @@ class NativeMapView extends StatefulWidget {
     required this.settings,
     this.selectedPoi,
     this.selectedRoutePoints = const [],
+    this.routeOutlinePoints = const [],
     this.alternativeRoutePoints = const [],
     this.trafficEnabled = false,
     this.handle,
@@ -50,6 +51,10 @@ class NativeMapView extends StatefulWidget {
   final SettingsService settings;
   final Poi? selectedPoi;
   final List<GeoPoint> selectedRoutePoints;
+
+  /// 导航态全程剩余轮廓（极淡色）；非空 = 导航渲染模式
+  /// （语义同 AppMap 同名参数）。
+  final List<GeoPoint> routeOutlinePoints;
   final List<GeoPoint> alternativeRoutePoints;
   final bool trafficEnabled;
   final MapHandle? handle;
@@ -80,6 +85,14 @@ class _NativeMapViewState extends State<NativeMapView> {
 
   /// 最近一次已知的缩放（onCameraMoveEnd 回报），命令未指定 zoom 时沿用。
   double _lastZoom = 12;
+
+  /// 最近一次已知的相机中心（onCameraMoveEnd 回报 / 命令目标），
+  /// 旋转命令（pointUp）需要拿它原地转。
+  LatLng? _lastTarget;
+
+  /// 当前希望朝上的方向（0=北朝上）：moveCamera 时必须一并带上，
+  /// 否则 CameraPosition 默认 bearing=0 会把旋转打回北朝上。
+  double _currentBearing = 0;
 
   /// 程序主动移动相机的目标点。相机停稳后若实际中心明显偏离它，
   /// 判定为用户手动拖图（触发 onUserDragged，用于解除跟随锁定）。
@@ -144,15 +157,42 @@ class _NativeMapViewState extends State<NativeMapView> {
     if (controller == null) return;
     final latLng = _toLatLng(target);
     _expectedTarget = latLng;
+    _lastTarget = latLng;
     controller.moveCamera(
       CameraUpdate.newCameraPosition(
-        CameraPosition(target: latLng, zoom: zoom ?? _lastZoom, tilt: tilt),
+        CameraPosition(
+          target: latLng,
+          zoom: zoom ?? _lastZoom,
+          tilt: tilt,
+          bearing: _currentBearing,
+        ),
+      ),
+    );
+  }
+
+  /// 朝向旋转：原生 CameraPosition.bearing 即「朝上的方向」，
+  /// 直接取希望朝上的方向角；null 恢复北朝上（bearing 归 0）。
+  void _handlePointUp(double? headingDegrees) {
+    _currentBearing = headingDegrees ?? 0;
+    final controller = _controller;
+    final target = _lastTarget;
+    if (controller == null || target == null) return;
+    _expectedTarget = target;
+    controller.moveCamera(
+      CameraUpdate.newCameraPosition(
+        CameraPosition(
+          target: target,
+          zoom: _lastZoom,
+          tilt: widget.tilt,
+          bearing: _currentBearing,
+        ),
       ),
     );
   }
 
   void _onCameraMoveEnd(CameraPosition position) {
     _lastZoom = position.zoom;
+    _lastTarget = position.target;
     widget.onCameraSettled?.call(
       GeoPoint(
         latitude: position.target.latitude,
@@ -187,6 +227,7 @@ class _NativeMapViewState extends State<NativeMapView> {
       return TileMapView(
         selectedPoi: widget.selectedPoi,
         selectedRoutePoints: widget.selectedRoutePoints,
+        routeOutlinePoints: widget.routeOutlinePoints,
         alternativeRoutePoints: widget.alternativeRoutePoints,
         trafficEnabled: widget.trafficEnabled,
         baseStyle: widget.settings.mapBaseStyle,
@@ -197,16 +238,25 @@ class _NativeMapViewState extends State<NativeMapView> {
         onUserDragged: widget.onUserDragged,
       );
     }
+    // 导航渲染模式：起点标记抑制（当前位置标记已在该处），终点
+    // 标记取轮廓末点（= 真终点）。
+    final navMode = widget.routeOutlinePoints.isNotEmpty;
     final markers = <Marker>{
       if (widget.selectedPoi?.location != null)
         Marker(
           position: _toLatLng(widget.selectedPoi!.location!),
           infoWindow: InfoWindow(title: widget.selectedPoi!.name),
         ),
-      if (widget.selectedRoutePoints.isNotEmpty)
+      if (!navMode && widget.selectedRoutePoints.isNotEmpty)
         Marker(position: _toLatLng(widget.selectedRoutePoints.first)),
       if (widget.selectedRoutePoints.isNotEmpty)
-        Marker(position: _toLatLng(widget.selectedRoutePoints.last)),
+        Marker(
+          position: _toLatLng(
+            navMode
+                ? widget.routeOutlinePoints.last
+                : widget.selectedRoutePoints.last,
+          ),
+        ),
       if (widget.myLocation != null)
         Marker(
           position: _toLatLng(widget.myLocation!),
@@ -217,6 +267,12 @@ class _NativeMapViewState extends State<NativeMapView> {
         ),
     };
     final polylines = <Polyline>{
+      if (widget.routeOutlinePoints.length > 1)
+        Polyline(
+          points: widget.routeOutlinePoints.map(_toLatLng).toList(),
+          color: const Color(0x551A73E8),
+          width: 8,
+        ),
       if (widget.alternativeRoutePoints.length > 1)
         Polyline(
           points: widget.alternativeRoutePoints.map(_toLatLng).toList(),
@@ -273,6 +329,7 @@ class _NativeMapViewState extends State<NativeMapView> {
         _controller = controller;
         widget.handle?.attach(
           move: _handleMove,
+          pointUp: _handlePointUp,
           zoomIn: () => controller.moveCamera(CameraUpdate.zoomIn()),
           zoomOut: () => controller.moveCamera(CameraUpdate.zoomOut()),
         );

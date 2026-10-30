@@ -15,6 +15,7 @@ class MapHandle {
   void Function(GeoPoint target, double? zoom, double tilt)? _moveImpl;
   void Function()? _zoomInImpl;
   void Function()? _zoomOutImpl;
+  void Function(double? headingDegrees)? _pointUpImpl;
 
   bool get isAttached => _moveImpl != null;
 
@@ -22,17 +23,27 @@ class MapHandle {
     required void Function(GeoPoint target, double? zoom, double tilt) move,
     required void Function() zoomIn,
     required void Function() zoomOut,
+    void Function(double? headingDegrees)? pointUp,
   }) {
     _moveImpl = move;
     _zoomInImpl = zoomIn;
     _zoomOutImpl = zoomOut;
+    _pointUpImpl = pointUp;
   }
 
   void detach() {
     _moveImpl = null;
     _zoomInImpl = null;
     _zoomOutImpl = null;
+    _pointUpImpl = null;
   }
+
+  /// 让 [headingDegrees] 方向朝上（导航车头朝上）；null = 恢复北朝上。
+  /// [headingDegrees] 是「希望出现在屏幕正上方的方向」（0=正北、
+  /// 顺时针为正）。各底图自行翻译成本端旋转语义（瓦片层是内容
+  /// 旋转角取负；原生层是 CameraPosition.bearing 直接取该值）。
+  /// 实现未提供时静默忽略（如旧实现），页面逻辑不因此崩溃。
+  void pointUp(double? headingDegrees) => _pointUpImpl?.call(headingDegrees);
 
   /// 移动相机到 [target]（GCJ-02）；zoom 为 null 时保持当前缩放。
   /// tilt 为旧原生底图接口保留：瓦片底图是 2D 平面图，实现侧忽略。
@@ -63,6 +74,7 @@ class AppMap extends StatelessWidget {
     this.dark = false,
     this.selectedPoi,
     this.selectedRoutePoints = const [],
+    this.routeOutlinePoints = const [],
     this.alternativeRoutePoints = const [],
     this.trafficEnabled = false,
     this.showLocationDot = true,
@@ -82,6 +94,12 @@ class AppMap extends StatelessWidget {
 
   final Poi? selectedPoi;
   final List<GeoPoint> selectedRoutePoints;
+
+  /// 全程剩余轮廓（导航态专用）：非空即进入导航渲染模式——
+  /// [selectedRoutePoints] 按「当前路段」高亮绘制，本层以极淡色
+  /// 画剩余全程；终点标记取本层末点，起点标记抑制（当前位置点
+  /// 已覆盖）。规划态传空，渲染与旧版一致。
+  final List<GeoPoint> routeOutlinePoints;
   final List<GeoPoint> alternativeRoutePoints;
   final bool trafficEnabled;
 
@@ -119,6 +137,7 @@ class AppMap extends StatelessWidget {
         settings: settings,
         selectedPoi: selectedPoi,
         selectedRoutePoints: selectedRoutePoints,
+        routeOutlinePoints: routeOutlinePoints,
         alternativeRoutePoints: alternativeRoutePoints,
         trafficEnabled: trafficEnabled,
         handle: handle,
@@ -131,6 +150,7 @@ class AppMap extends StatelessWidget {
     return TileMapView(
       selectedPoi: selectedPoi,
       selectedRoutePoints: selectedRoutePoints,
+      routeOutlinePoints: routeOutlinePoints,
       alternativeRoutePoints: alternativeRoutePoints,
       trafficEnabled: trafficEnabled,
       baseStyle: settings.mapBaseStyle,
