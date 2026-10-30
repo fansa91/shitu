@@ -40,6 +40,15 @@ android {
         versionName = flutter.versionName
     }
 
+    // vendored 高德 8.1.0 的 .so 是 64KB 段对齐的老库，在 4KB 页设备（如一加 7 Pro）
+    // 上以不解压直接映射方式打包时装机扫描过不去（系统只报「未安装应用」），
+    // 故强制传统打包：安装时解压 .so 到应用库目录再加载。
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
     signingConfigs {
         create("release") {
             if (keystorePropertiesFile.exists()) {
