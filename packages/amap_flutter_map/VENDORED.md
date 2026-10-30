@@ -1,4 +1,8 @@
-> **已停用（2026-10-30）**：识途底图已切换为 flutter_map + 高德 Web 瓦片（见 lib/widgets/tile_map_view.dart 与 lib/services/map_tiles.dart），本 vendored 插件自此不再被 pubspec 引用，保留在仓内仅作历史留档，勿再基于它开发。
+> **仅 iOS 启用（2026-10-30 三期起）**：本插件只供 iOS 原生地图
+> （lib/widgets/native_map_view.dart）。Android 侧已整体桩化（补丁 13）：
+> 不注册视图、无高德 Android SDK 依赖、jniLibs 的 .so 已删，安卓包
+> 不会出现 libAMapSDK_MAP；安卓/桌面底图用 flutter_map + Web 瓦片
+> （lib/widgets/tile_map_view.dart）。iOS 侧实现保持原样。
 
 # Vendored: amap_flutter_map 3.0.0
 
@@ -158,14 +162,36 @@ MapView 创建链全程走通、进程改死在 onCreate 之后的渲染启动�
         启动段时 `java_map_ready`/`java_map_loaded` 都不会出现，停留步
         落在 `java_onresume_done`（或更早）即为实锤。
 
+13. **Android 侧整体桩化（三期 iOS-only，2026-10-30）**：
+    背景：高德原生 GL 渲染器在一加 7 Pro 上两大 SDK 版本、两种视图类
+    均死于渲染器启动（v0.2.1–v0.2.6 逐项排除 Key/签名/绑定/打包后
+    定论），安卓底图自 a042fdc 起改 Web 瓦片；iOS 的 MAMapKit/Metal
+    渲染一直正常，三期只恢复 iOS 原生。要求：插件重新成为 pubspec
+    依赖后，Android 包绝不能再带高德地图原生库（.so 回归 = 崩溃与
+    装机问题回归）。做法：
+    - `AMapFlutterMapPlugin.java` 改为最小桩：类本体保留（注册器按
+      pluginClass 引用），`onAttachedToEngine` 不注册任何视图工厂；
+      不实现 ActivityAware（桩不需要生命周期）。
+    - 删除其余全部 Java 实现（平台视图/工厂/控制器/叠加物/utils，
+      含补丁 1/9/10/11/12 涉及的 Android 文件——它们的历史记录保留
+      在上方清单与 git 历史中，仅代码不再存在）。
+    - `android/build.gradle`：删 `com.amap.api:3dmap:8.1.0` 依赖、
+      `consumer-rules.pro` 引用（文件一并删除，补丁 11 的 R8 规则
+      随之退役——没有 SDK 依赖就没有缺失类）、
+      `useLibrary 'org.apache.http.legacy'`（补丁 10 的配套声明）。
+    - 删除 `android/src/main/jniLibs/` 三个 ABI 的
+      `libAMapSDK_MAP_v8_1_0.so`（补丁 10 提取物）。
+    - Dart 侧与 iOS 侧（Classes/podspec，依赖 AMap3DMap）**零改动**。
+    - Dart 在 Android 上本就永不构建 AMapWidget（AppMap 平台分流），
+      桩化是第二重保险：即便误建也只报未注册视图类型，不碰原生渲染。
+
 ## 未改动的原有机制（与换插件决策相关）
 
 - 运行时 Key/隐私注入走 AMapWidget 的 `apiKey` / `privacyStatement` 创建参数：
-  Android 工厂 `AMapPlatformViewFactory.create()` 先
-  `ConvertUtil.setPrivacyStatement(...)`（反射调 MapsInitializer 的
-  updatePrivacyShow/updatePrivacyAgree）、再 `ConvertUtil.checkApiKey(...)`
-  （MapsInitializer.setApiKey），最后才 `builder.build(...)` 构造平台视图
-  （即 MapView），顺序满足「注入在建图之前」。
+  平台工厂在构造地图视图之前先注入隐私声明（updatePrivacyShow /
+  updatePrivacyAgree）、再 setApiKey，顺序满足「注入在建图之前」。
+  （三期桩化后 Android 工厂已删，本机制现仅 iOS 工厂在用；上文的
+  Android 工厂细节是历史记录。）
 - `onMapCreated` 语义：平台视图创建完成后，Dart 侧经
   `AMapController.init` 等原生 `map#waitForMap`（AMap 就绪）后才回调，
   与旧 fork 一致，可作为「建图完成」面包屑落点。

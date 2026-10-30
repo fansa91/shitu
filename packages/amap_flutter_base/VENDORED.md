@@ -1,4 +1,6 @@
-> **已停用（2026-10-30）**：识途底图已切换为 flutter_map + 高德 Web 瓦片（见 lib/widgets/tile_map_view.dart 与 lib/services/map_tiles.dart），本 vendored 插件自此不再被 pubspec 引用，保留在仓内仅作历史留档，勿再基于它开发。
+> **仅 iOS 启用（2026-10-30 三期起）**：本包是纯 Dart 基础库，随
+> amap_flutter_map 一并仅供 iOS 原生地图使用（安卓/桌面底图为
+> flutter_map + Web 瓦片）；已重新被主工程 pubspec 引用。
 
 # Vendored: amap_flutter_base 3.0.0
 

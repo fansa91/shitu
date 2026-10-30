@@ -1,87 +1,33 @@
 package com.amap.flutter.map;
 
 import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
-import androidx.lifecycle.Lifecycle;
-
-import com.amap.flutter.map.utils.LogUtil;
-
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin;
-import io.flutter.embedding.engine.plugins.activity.ActivityAware;
-import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding;
-import io.flutter.embedding.engine.plugins.lifecycle.FlutterLifecycleAdapter;
 
 /**
- * AmapFlutterMapPlugin
+ * [vendored patch · 三期 iOS-only 桩化] 本插件自 2026-10-30 三期起
+ * **仅 iOS 启用**：Android 侧的高德原生地图 GL 渲染器在目标机型上
+ * 必崩（识途 v0.2.1–v0.2.6 实锤），安卓底图已改 Web 瓦片、永不
+ * 创建本插件的平台视图。
+ *
+ * 因此 Android 实现整体桩化：保留插件类本体（GeneratedPluginRegistrant
+ * 按 pubspec 的 pluginClass 引用它，类必须存在且可实例化），但
+ * onAttachedToEngine **不注册任何视图工厂**；原实现文件（平台视图、
+ * 控制器、叠加物、工具类）已全部删除，build.gradle 不再依赖
+ * com.amap.api:3dmap，jniLibs 里的 libAMapSDK_MAP .so 已移除——
+ * 安卓安装包里不会再出现任何高德地图原生库。iOS 侧实现原样保留。
  */
-public class AMapFlutterMapPlugin implements
-        FlutterPlugin,
-        ActivityAware {
-    private static final String CLASS_NAME = "AMapFlutterMapPlugin";
-    private FlutterPluginBinding pluginBinding;
-    private Lifecycle lifecycle;
-
-    private static final String VIEW_TYPE = "com.amap.flutter.map";
-
-    // [vendored patch] 删除 v1 嵌入的 registerWith(PluginRegistry.Registrar)：
-    // Registrar 已被现行 Flutter 移除（CI 编译报 cannot find symbol），
-    // v2 的 onAttachedToEngine 已完整注册同一视图工厂，删除不改变行为。
-
-    public AMapFlutterMapPlugin() {
-    }
-
-    // FlutterPlugin
+public class AMapFlutterMapPlugin implements FlutterPlugin {
 
     @Override
     public void onAttachedToEngine(@NonNull FlutterPluginBinding binding) {
-        LogUtil.i(CLASS_NAME, "onAttachedToEngine==>");
-        pluginBinding = binding;
-        binding
-                .getPlatformViewRegistry()
-                .registerViewFactory(
-                        VIEW_TYPE,
-                        new AMapPlatformViewFactory(
-                                binding.getBinaryMessenger(),
-                                new LifecycleProvider() {
-                                    @Nullable
-                                    @Override
-                                    public Lifecycle getLifecycle() {
-                                        return lifecycle;
-                                    }
-                                }));
+        // 桩实现：不注册视图工厂。Dart 侧在 Android 上不会构建
+        // AMapWidget（AppMap 平台分流只在 iOS 选原生），即便误建，
+        // 也只会得到「未注册视图类型」的框架错误而非原生崩溃。
     }
 
     @Override
     public void onDetachedFromEngine(@NonNull FlutterPluginBinding binding) {
-        LogUtil.i(CLASS_NAME, "onDetachedFromEngine==>");
-        pluginBinding = null;
-    }
-
-
-    // ActivityAware
-
-    @Override
-    public void onAttachedToActivity(@NonNull ActivityPluginBinding binding) {
-        LogUtil.i(CLASS_NAME, "onAttachedToActivity==>");
-        lifecycle = FlutterLifecycleAdapter.getActivityLifecycle(binding);
-    }
-
-    @Override
-    public void onDetachedFromActivity() {
-        LogUtil.i(CLASS_NAME, "onDetachedFromActivity==>");
-        lifecycle = null;
-    }
-
-    @Override
-    public void onReattachedToActivityForConfigChanges(@NonNull ActivityPluginBinding binding) {
-        LogUtil.i(CLASS_NAME, "onReattachedToActivityForConfigChanges==>");
-        onAttachedToActivity(binding);
-    }
-
-    @Override
-    public void onDetachedFromActivityForConfigChanges() {
-        LogUtil.i(CLASS_NAME, "onDetachedFromActivityForConfigChanges==>");
-        this.onDetachedFromActivity();
+        // 无状态，无需清理。
     }
 }

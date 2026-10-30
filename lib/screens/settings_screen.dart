@@ -36,6 +36,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final Map<MapProvider, TextEditingController> _keyControllers = {};
   final _nvidiaController = TextEditingController();
   final _amapSdkController = TextEditingController();
+  final _amapIosSdkController = TextEditingController();
 
   /// 高德定位崩溃守卫（与定位服务共用同一份存储，见 location_guard.dart）。
   final _locationGuard = AmapLocationGuard();
@@ -53,6 +54,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
     _nvidiaController.text = _settings.nvidiaKey;
     _amapSdkController.text = _settings.amapSdkAndroidKey;
+    _amapIosSdkController.text = _settings.amapSdkIosKey;
     _loadVersion();
     _loadRuntimeSignature();
     _loadGuardState();
@@ -104,6 +106,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
     _nvidiaController.dispose();
     _amapSdkController.dispose();
+    _amapIosSdkController.dispose();
     super.dispose();
   }
 
@@ -371,10 +374,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       const Padding(
                         padding: EdgeInsets.only(top: 10),
                         child: Text(
-                          '底图为 Web 瓦片（2D 平面图），不需要填 Key；'
-                          '瓦片版无 3D 倾斜与建筑。高德卫星叠加路网标注、'
-                          '路况图层仅高德源可用；腾讯卫星只有影像、'
-                          '无标注与路况图层。',
+                          '以下图源/样式适用于安卓/桌面的瓦片底图'
+                          '（iOS 用原生高德地图，见下方「高德 SDK Key」）。'
+                          '瓦片为 Web 图（2D 平面图），不需要填 Key、无 3D '
+                          '倾斜与建筑。高德卫星叠加路网标注、路况图层仅高德'
+                          '源可用；腾讯卫星只有影像、无标注与路况图层。',
                           style: TextStyle(fontSize: 12),
                         ),
                       ),
@@ -383,17 +387,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
               _sectionTitle('高德定位'),
-              _keyCard(
-                id: 'amap_sdk',
-                title: '高德 Android SDK Key（仅定位用）',
-                controller: _amapSdkController,
-                filled: _settings.hasAmapSdkAndroidKey,
-                getKeyUrl: KeyConsoleUrls.forProvider(MapProvider.amap),
-                onSave: () async {
-                  await _settings.setAmapSdkAndroidKey(_amapSdkController.text);
-                  _snack('高德 SDK Key 已保存（供 Android 高德定位）');
-                },
-              ),
+              _sdkKeysCard(),
               Card(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
@@ -422,7 +416,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         contentPadding: EdgeInsets.zero,
                         title: const Text('同意高德隐私政策'),
                         subtitle: const Text(
-                          '使用高德定位前必须同意；未同意时不会初始化高德定位 SDK。',
+                          '使用高德定位与 iOS 原生地图前必须同意；未同意时'
+                          '不会初始化高德定位 SDK、iOS 也不启用原生地图。',
                           style: TextStyle(fontSize: 12),
                         ),
                         value: _settings.privacyAgreed,
@@ -650,6 +645,126 @@ class _SettingsScreenState extends State<SettingsScreen> {
           tooltip: '复制',
           onPressed: () => _copy(value),
         ),
+      ],
+    );
+  }
+
+  /// 高德 SDK Key 合并卡：Android Key（供定位）与 iOS Key（供 iOS
+  /// 原生地图）同卡管理——两把 Key 在高德控制台同属一个应用，
+  /// 绑定信息（包名 / 签名）见下方申请指南。
+  Widget _sdkKeysCard() {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('高德 SDK Key', style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 4),
+            _sdkKeyBlock(
+              id: 'amap_sdk_android',
+              label: 'Android Key（供定位）',
+              controller: _amapSdkController,
+              filled: _settings.hasAmapSdkAndroidKey,
+              onSave: () async {
+                await _settings.setAmapSdkAndroidKey(_amapSdkController.text);
+                _snack('Android SDK Key 已保存（供高德定位）');
+              },
+            ),
+            const Divider(height: 22),
+            _sdkKeyBlock(
+              id: 'amap_sdk_ios',
+              label: 'iOS Key（供 iOS 原生地图）',
+              controller: _amapIosSdkController,
+              filled: _settings.hasAmapSdkIosKey,
+              onSave: () async {
+                await _settings.setAmapSdkIosKey(_amapIosSdkController.text);
+                _snack('iOS SDK Key 已保存（供 iOS 原生地图）');
+              },
+            ),
+            const Padding(
+              padding: EdgeInsets.only(top: 10),
+              child: Text(
+                'iOS 填 Key 并同意下方隐私后使用原生高德地图，'
+                '没填则回落瓦片底图。两把 Key 与上方三家 Web Key '
+                '（搜索/算路）互不通用，分开申请。',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// SDK Key 卡内的单个 Key 区块（状态点 + 标签 + 密码框 + 保存/
+  /// 本地格式测试 + 申请入口），版式与 [_keyCard] 一致。
+  Widget _sdkKeyBlock({
+    required String id,
+    required String label,
+    required TextEditingController controller,
+    required bool filled,
+    required VoidCallback onSave,
+  }) {
+    final result = _testResults[id];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(child: Text(label)),
+            Container(
+              width: 9,
+              height: 9,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: filled
+                    ? const Color(0xFF34A853)
+                    : Theme.of(context).colorScheme.outlineVariant,
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              filled ? '已填写' : '未填写',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: controller,
+          obscureText: true,
+          decoration: const InputDecoration(
+            hintText: '粘贴你申请的 Key',
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            FilledButton.tonal(onPressed: onSave, child: const Text('保存')),
+            const SizedBox(width: 8),
+            OutlinedButton(
+              onPressed: _testing.contains(id)
+                  ? null
+                  : () => _testLocalFormat(id, controller.text),
+              child: Text(_testing.contains(id) ? '测试中…' : '测试连接'),
+            ),
+          ],
+        ),
+        _getKeyButton(KeyConsoleUrls.forProvider(MapProvider.amap)),
+        if (result != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              result,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
       ],
     );
   }

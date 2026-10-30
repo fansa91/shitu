@@ -18,13 +18,14 @@ import 'map_tiles.dart';
 /// 安全存储不可用时（如无平台通道的测试环境）Key 仅内存生效，
 /// 绝不回退写明文。
 ///
-/// 底图已于 2026-10-30 改为 Web 瓦片（不需要 Key）；原生地图时代的
-/// 兼容模式等字段已退役。例外：高德 Android SDK Key 与隐私同意于
-/// 同日随「高德定位」恢复（同名存储，旧值可读回），仅供定位使用，
-/// 底图仍然不用 Key。
+/// 底图已于 2026-10-30 改为 Web 瓦片（安卓/桌面不需要 Key）；原生
+/// 地图时代的兼容模式等字段已退役。例外：高德 Android SDK Key 与
+/// 隐私同意于同日随「高德定位」恢复（同名存储，旧值可读回）——
+/// Android Key 仅供定位；iOS SDK Key 随三期 iOS 原生地图一并恢复，
+/// 两把 Key 与隐私同意同卡管理（见设置页「高德定位」）。
 class SettingsService extends ChangeNotifier {
   SettingsService({FlutterSecureStorage? secureStorage})
-      : _secure = secureStorage ?? const FlutterSecureStorage();
+    : _secure = secureStorage ?? const FlutterSecureStorage();
 
   final FlutterSecureStorage _secure;
   static const _kProvider = 'provider';
@@ -38,6 +39,7 @@ class SettingsService extends ChangeNotifier {
   static const _kMapBaseStyle = 'map_base_style';
   static const _kMapTileSource = 'map_tile_source';
   static const _kAmapSdkAndroidKey = 'amap_sdk_android_key';
+  static const _kAmapSdkIosKey = 'amap_sdk_ios_key';
   static const _kPrivacyAgreed = 'privacy_agreed';
   static const _kLocationSourceMode = 'location_source_mode';
   static const _kThemeMode = 'theme_mode';
@@ -55,6 +57,7 @@ class SettingsService extends ChangeNotifier {
   MapBaseStyle _mapBaseStyle = MapBaseStyle.standard;
   MapTileSource _mapTileSource = MapTileSource.amap;
   String _amapSdkAndroidKey = '';
+  String _amapSdkIosKey = '';
   bool _privacyAgreed = false;
   LocationSourceMode _locationSourceMode = LocationSourceMode.auto;
   AppThemeMode _themeMode = AppThemeMode.system;
@@ -85,8 +88,15 @@ class SettingsService extends ChangeNotifier {
   String get amapSdkAndroidKey => _amapSdkAndroidKey;
   bool get hasAmapSdkAndroidKey => _amapSdkAndroidKey.trim().isNotEmpty;
 
-  /// 用户是否已同意高德隐私政策（同意前绝不初始化高德定位 SDK；
-  /// 字段名沿用原生地图时代的 'privacy_agreed'，旧同意状态可读回）。
+  /// 高德 iOS SDK Key —— 仅供 **iOS 原生地图**（三期恢复；存储名沿用
+  /// 原生地图时代的 'amap_sdk_ios_key'，旧值可读回）。为空时 iOS
+  /// 回落瓦片底图（见 services/map_backend.dart 的后端选择）。
+  String get amapSdkIosKey => _amapSdkIosKey;
+  bool get hasAmapSdkIosKey => _amapSdkIosKey.trim().isNotEmpty;
+
+  /// 用户是否已同意高德隐私政策（同意前绝不初始化高德定位 SDK、
+  /// iOS 也不启用原生地图；字段名沿用原生地图时代的
+  /// 'privacy_agreed'，旧同意状态可读回）。
   bool get privacyAgreed => _privacyAgreed;
 
   /// 定位源偏好三档（自动 / 高德 / 系统），见 [LocationSourceMode]。
@@ -111,6 +121,7 @@ class SettingsService extends ChangeNotifier {
     _kKeyTencent,
     _kKeyNvidia,
     _kAmapSdkAndroidKey,
+    _kAmapSdkIosKey,
   ];
 
   Future<void> load() async {
@@ -122,8 +133,9 @@ class SettingsService extends ChangeNotifier {
     _mapBaseStyle = _mapBaseStyleFromName(prefs.getString(_kMapBaseStyle));
     _mapTileSource = _mapTileSourceFromName(prefs.getString(_kMapTileSource));
     _privacyAgreed = prefs.getBool(_kPrivacyAgreed) ?? false;
-    _locationSourceMode =
-        _locationSourceModeFromName(prefs.getString(_kLocationSourceMode));
+    _locationSourceMode = _locationSourceModeFromName(
+      prefs.getString(_kLocationSourceMode),
+    );
     _themeMode = _themeModeFromName(prefs.getString(_kThemeMode));
     _dynamicColorEnabled = prefs.getBool(_kDynamicColor) ?? true;
     _seedColorValue = prefs.getInt(_kSeedColorValue) ?? _seedColorValue;
@@ -136,9 +148,7 @@ class SettingsService extends ChangeNotifier {
   /// 安全存储为空而旧 prefs 有值 → 搬进安全存储并删旧明文；
   /// 安全存储整体不可用 → 用旧明文值兜底（不迁移、不删，留待下次）。
   Future<void> _loadKeys(SharedPreferences prefs) async {
-    final legacy = {
-      for (final k in _keyFields) k: prefs.getString(k) ?? '',
-    };
+    final legacy = {for (final k in _keyFields) k: prefs.getString(k) ?? ''};
     Map<String, String?>? secureValues;
     try {
       secureValues = {
@@ -171,6 +181,7 @@ class SettingsService extends ChangeNotifier {
     _keys[MapProvider.tencent] = resolved[_kKeyTencent] ?? '';
     _nvidiaKey = resolved[_kKeyNvidia] ?? '';
     _amapSdkAndroidKey = resolved[_kAmapSdkAndroidKey] ?? '';
+    _amapSdkIosKey = resolved[_kAmapSdkIosKey] ?? '';
   }
 
   /// 写安全存储：空值删除；失败静默（仅内存生效，绝不回退明文）。
@@ -204,6 +215,12 @@ class SettingsService extends ChangeNotifier {
     _amapSdkAndroidKey = value.trim();
     notifyListeners();
     await _writeSecure(_kAmapSdkAndroidKey, value.trim());
+  }
+
+  Future<void> setAmapSdkIosKey(String value) async {
+    _amapSdkIosKey = value.trim();
+    notifyListeners();
+    await _writeSecure(_kAmapSdkIosKey, value.trim());
   }
 
   Future<void> setPrivacyAgreed(bool value) async {
@@ -282,10 +299,10 @@ class SettingsService extends ChangeNotifier {
   }
 
   String _storageKeyFor(MapProvider provider) => switch (provider) {
-        MapProvider.amap => _kKeyAmap,
-        MapProvider.baidu => _kKeyBaidu,
-        MapProvider.tencent => _kKeyTencent,
-      };
+    MapProvider.amap => _kKeyAmap,
+    MapProvider.baidu => _kKeyBaidu,
+    MapProvider.tencent => _kKeyTencent,
+  };
 
   MapProvider _providerFromName(String? name) =>
       MapProvider.values.where((p) => p.name == name).firstOrNull ??

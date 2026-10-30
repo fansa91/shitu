@@ -103,4 +103,17 @@ void main() {
     expect(reloaded.privacyAgreed, isTrue);
     expect(reloaded.locationSourceMode, LocationSourceMode.amap);
   });
+
+  test('iOS SDK Key（供 iOS 原生地图）：安全存储往返，默认空', () async {
+    final service = SettingsService();
+    await service.load();
+    expect(service.amapSdkIosKey, isEmpty);
+    expect(service.hasAmapSdkIosKey, isFalse);
+
+    await service.setAmapSdkIosKey(' ios-key-456 ');
+    final reloaded = SettingsService();
+    await reloaded.load();
+    expect(reloaded.amapSdkIosKey, 'ios-key-456');
+    expect(reloaded.hasAmapSdkIosKey, isTrue);
+  });
 }

@@ -3,18 +3,13 @@
 // fork amap_map 1.0.15 已在本工程 CI 验证过的骨架：namespace、compileSdk 35、
 // mavenCentral。
 //
-// [vendored patch] 原生 SDK 版本二分（故障排查）：依赖改回官方 3.0.0 原配
-// 版本线——官方原始文件（pub 缓存 amap_flutter_map-3.0.0/android/build.gradle）
-// 的依赖行是 compileOnly 'com.amap.api:3dmap:8.1.0'。8.1.0 在 Maven Central
-// 是 jar 打包（非 aar），jar 内含 classes 与 lib/<abi>/libAMapSDK_MAP_v8_1_0.so；
-// Gradle 不会从普通 jar 依赖里提取 .so，故：
-//   1) 依赖行用 implementation（而非官方的 compileOnly——本插件必须自带 SDK
-//      运行时，宿主 App 不另行提供），版本与坐标与官方原配一致（8.1.0）；
-//   2) 本工程实际出包的三个 ABI（arm64-v8a / armeabi-v7a / x86_64）的 .so 已从
-//      同一个官方 jar 原样提取到 src/main/jniLibs/（SHA-256 见 VENDORED.md）。
-// 此前用的是组合包 3dmap-location-search 10.1.200——所有真机失败构建的共同
-// 因子，本轮二分就是把它换掉；location/search 原生 SDK 本工程未使用
-// （定位走 geolocator、搜索走 Web API），不随本次引入。
+// [vendored patch · 三期 iOS-only 桩化] 本插件仅 iOS 启用：Android 侧
+// 已无任何高德 SDK 依赖——原 `implementation 'com.amap.api:3dmap:8.1.0'`
+// 依赖行、为它提取的 src/main/jniLibs/*.so（libAMapSDK_MAP_v8_1_0.so）、
+// consumer-rules.pro（为 8.1.0 的 R8 缺失类规则）、
+// useLibrary 'org.apache.http.legacy'（8.1.0 网络层需要）全部移除；
+// Java 只剩不注册视图的桩插件类（见 AMapFlutterMapPlugin.java）。
+// 安卓包自此不含任何高德地图原生代码与 .so。iOS 侧不受影响。
 group 'com.amap.flutter.map'
 version '1.0'
 
@@ -44,22 +39,12 @@ android {
 
     defaultConfig {
         minSdkVersion 21
-        // [vendored patch] 随库下发 R8 规则：8.1.0 mapcore 引用了本工程
-        // 有意不引入的定位 SDK 类，缺此规则 :app:minifyReleaseWithR8 会以
-        // Missing class 硬失败（详见 consumer-rules.pro 内注释）。
-        consumerProguardFiles 'consumer-rules.pro'
     }
-    // [vendored patch] 8.1.0 的网络层（mapcore util）引用 Apache HttpClient，
-    // 该类库自 Android 6 起移出 bootclasspath；高德当年的官方接入文档即要求
-    // 宿主声明 useLibrary 'org.apache.http.legacy'，vendored 插件在此代为声明，
-    // 随库 Manifest 合并进 App。
-    useLibrary 'org.apache.http.legacy'
     lintOptions {
         disable 'InvalidPackage'
     }
 }
 
 dependencies {
-    implementation 'com.amap.api:3dmap:8.1.0'
     implementation 'androidx.annotation:annotation:1.9.1'
 }
