@@ -1,5 +1,6 @@
 package com.shitu.shitu
 
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import io.flutter.embedding.android.FlutterActivity
@@ -28,6 +29,34 @@ class MainActivity : FlutterActivity() {
                         result.success(signingSha1Hex())
                     } catch (e: Exception) {
                         result.error("SIGNING_ERROR", e.message ?: "读取签名失败", null)
+                    }
+                } else {
+                    result.notImplemented()
+                }
+            }
+        // 原生地图探针通道：Dart 侧设置页把用户自填的高德 Android SDK
+        // Key 与当前定位（GCJ-02，可缺省）传进来，这里以 startActivity
+        // 打开独立原生 Activity 承载 TextureMapView（绕开 Flutter
+        // 平台视图嵌入层，见 NativeMapProbeActivity.kt 的背景说明）。
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.shitu.app/native_map_probe")
+            .setMethodCallHandler { call, result ->
+                if (call.method == "openProbe") {
+                    try {
+                        val intent = Intent(this, NativeMapProbeActivity::class.java)
+                        intent.putExtra(
+                            NativeMapProbeActivity.EXTRA_API_KEY,
+                            call.argument<String>("apiKey") ?: "",
+                        )
+                        call.argument<Double>("latitude")?.let {
+                            intent.putExtra(NativeMapProbeActivity.EXTRA_LATITUDE, it)
+                        }
+                        call.argument<Double>("longitude")?.let {
+                            intent.putExtra(NativeMapProbeActivity.EXTRA_LONGITUDE, it)
+                        }
+                        startActivity(intent)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("PROBE_OPEN", e.message ?: "打开探针页失败", null)
                     }
                 } else {
                     result.notImplemented()

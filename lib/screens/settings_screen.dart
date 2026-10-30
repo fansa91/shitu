@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import '../models/geo_point.dart';
 import '../models/located_fix.dart';
 import '../models/map_provider.dart';
 import '../theme/appearance.dart';
@@ -11,7 +13,9 @@ import '../services/api_exception.dart';
 import '../services/app_signature_service.dart';
 import '../services/location_guard.dart';
 import '../services/location_runtime_status.dart';
+import '../services/location_service.dart';
 import '../services/map_data_services.dart';
+import '../services/native_map_probe.dart';
 import '../services/map_tiles.dart';
 import '../services/settings_service.dart';
 import '../services/tts_service.dart';
@@ -26,7 +30,8 @@ class SettingsScreen extends StatefulWidget {
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
+class _SettingsScreenState extends State<SettingsScreen>
+    with WidgetsBindingObserver {
   /// 固定发布 keystore 的证书 SHA1 指纹（公开值，非密码）：与仓库 Secrets
   /// 中 ANDROID_KEYSTORE_BASE64 对应的那把钥匙一致，换钥匙时同步更新这里。
   static const _releaseSha1 =
@@ -41,6 +46,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// 高德定位崩溃守卫（与定位服务共用同一份存储，见 location_guard.dart）。
   final _locationGuard = AmapLocationGuard();
   bool _locationGuardTripped = false;
+
+  /// 原生地图探针（仅 Android）：留痕读取 + 打开探针页。
+  final _probe = NativeMapProbeService();
+  ProbeStatus? _probeStatus;
   final Map<String, String> _testResults = {};
   final Set<String> _testing = {};
 
@@ -58,6 +67,73 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadVersion();
     _loadRuntimeSignature();
     _loadGuardState();
+    WidgetsBinding.instance.addObserver(this);
+    _loadProbeStatus();
+  }
+
+  /// 从探针页返回（或崩溃后重启回到设置页）时刷新探针留痕判读。
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _loadProbeStatus();
+  }
+
+  Future<void> _loadProbeStatus() async {
+    if (defaultTargetPlatform != TargetPlatform.android) return;
+    final status = await _probe.lastStatus();
+    if (!mounted) return;
+    setState(() => _probeStatus = status);
+  }
+
+  /// 打开原生地图探针页：先过前置条件（Key + 隐私同意），再尽力取
+  /// 当前定位作为探针页的落点（取不到不拦，原生侧用默认点）。
+  Future<void> _openProbe() async {
+    final blocker = probeBlocker(
+      hasSdkKey: _settings.hasAmapSdkAndroidKey,
+      privacyAgreed: _settings.privacyAgreed,
+    );
+    if (blocker == ProbeBlocker.missingKey) {
+      _snack('请先在上方「高德 SDK Key」卡填写 Android SDK Key');
+      return;
+    }
+    if (blocker == ProbeBlocker.privacyNotAgreed) {
+      final agreed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('同意高德隐私政策'),
+          content: const Text(
+            '原生地图探针使用高德地图 SDK，需先同意高德隐私政策'
+            '（与高德定位共用同一份同意，就是上方那个开关）。',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('同意并打开'),
+            ),
+          ],
+        ),
+      );
+      if (agreed != true || !mounted) return;
+      await _settings.setPrivacyAgreed(true);
+    }
+    GeoPoint? target;
+    try {
+      final fix = await LocationService(settings: _settings)
+          .currentFix()
+          .timeout(const Duration(seconds: 5));
+      target = fix.point;
+    } catch (_) {
+      // 定位失败不拦探针：原生侧会用天安门默认点。
+      target = null;
+    }
+    try {
+      await _probe.open(apiKey: _settings.amapSdkAndroidKey, target: target);
+    } on PlatformException catch (e) {
+      _snack('打开探针页失败：${e.message ?? e.code}');
+    }
   }
 
   Future<void> _loadGuardState() async {
@@ -101,6 +177,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     for (final c in _keyControllers.values) {
       c.dispose();
     }
@@ -489,6 +566,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
               ),
+              // 原生地图探针入口（仅 Android）：独立原生 Activity 直挂
+              // TextureMapView，与瓦片底图是两条完全独立的路径，
+              // 只为验证原生高德地图能否在本机出图。
+              if (defaultTargetPlatform == TargetPlatform.android)
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.science_outlined),
+                    title: const Text('原生地图探针（实验）'),
+                    subtitle: Text(
+                      _probeStatus == null
+                          ? '读取中…'
+                          : probeStatusText(_probeStatus!),
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: _openProbe,
+                  ),
+                ),
               _keyCard(
                 id: 'nvidia',
                 title: '英伟达 TTS Key（可选）',

@@ -30,8 +30,16 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- 原生地图探针页（实验）：独立原生 Activity 直挂
+             TextureMapView，绕开 Flutter 平台视图嵌入层验证原生
+             高德地图能否在用户设备出图。Key 由 Dart 侧运行时经
+             Intent 传入，不写 Manifest。仅内部打开，不导出。 -->
+        <activity
+            android:name=".NativeMapProbeActivity"
+            android:exported="false"
+            android:label="原生地图探针" />
         <!-- 高德定位 SDK 的定位服务组件（官方接入要求声明；
-             与底图无关，底图已改 Web 瓦片、无原生地图 SDK）。 -->
+             定位桥与组合包内的定位实现共用）。 -->
         <service android:name="com.amap.api.location.APSService" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

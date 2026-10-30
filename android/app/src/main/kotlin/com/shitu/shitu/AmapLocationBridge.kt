@@ -10,7 +10,11 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 
 /**
- * 高德定位 SDK（com.amap.api:location:6.5.1）的最小原生桥：
+ * 高德定位 SDK（6.5.1）的最小原生桥。定位类由 app 的组合包依赖
+ * com.amap.api:3dmap-location-search:10.1.600_loc6.5.1 提供（其内
+ * 定位版本恰为 6.5.1；独立 location 工件与任何 3dmap 工件都会因
+ * jar 内自带的定位门面类产生 dex 重复类冲突，选型见 app 的
+ * build.gradle.kts 注释）：
  * Dart 侧 lib/services/amap_location.dart 经 MethodChannel
  * （com.shitu.app/amap_location）+ EventChannel
  * （com.shitu.app/amap_location_stream）调用。

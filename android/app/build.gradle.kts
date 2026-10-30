@@ -75,9 +75,25 @@ flutter {
 }
 
 dependencies {
-    // 高德定位 SDK（仅定位、不含地图渲染）：Dart 侧自写最小桥
-    // （AmapLocationBridge.kt）直连。版本取 Maven 长期线 6.5.1：
-    // AMapLocationClient / updatePrivacyShow / updatePrivacyAgree /
-    // setApiKey 均为该线经典 API。
-    implementation("com.amap.api:location:6.5.1")
+    // 高德组合包（地图 10.1.600 + 定位 6.5.1 + 搜索 9.7.4）：一包同时供
+    // ① 二期的定位桥（AmapLocationBridge.kt）与 ② 原生地图探针
+    // （NativeMapProbeActivity.kt）。
+    //
+    // 为什么不再单独依赖 com.amap.api:location:6.5.1（选型已实测核查）：
+    // - 任何 3dmap 工件（独立版 10.0.600 与组合包都一样）的 jar 内都自带
+    //   com.amap.api.location 的 24 个门面类，与 location:6.5.1 jar 里的
+    //   同名类必然 dex 重复类冲突，二者不可共存；
+    // - 组合包内的定位门面是自包含实现（内部走 com.amap.api.col.3sl +
+    //   com.autonavi.aps，均在本 jar 内；独立 location 包则走 com.loc），
+    //   且其定位版本恰为 6.5.1，与桥原依赖同版；
+    // - 桥用到的 API 已逐项用 javap 对组合包 jar 核实：静态
+    //   updatePrivacyShow/updatePrivacyAgree/setApiKey、构造、监听、
+    //   Option 的 setGpsFirst/setOffset/setHttpTimeOut 等签名全一致。
+    // 故移除独立 location 依赖、改由组合包统一提供，桥代码零改动。
+    //
+    // 原生库：jar 内的 libAMapSDK_MAP_v10_1_600.so 已手动提取到
+    // src/main/jniLibs/{arm64-v8a,armeabi-v7a}（jar 依赖不会被 AGP
+    // 自动解出 .so，与当年 vendored 插件提取 8.1.0 的做法相同）。
+    // 组合包仅含这两个 ABI 的 .so。
+    implementation("com.amap.api:3dmap-location-search:10.1.600_loc6.5.1_sea9.7.4")
 }

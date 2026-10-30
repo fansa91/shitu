@@ -100,7 +100,8 @@ abstract interface class AmapLocationBackend {
 
 /// 基于 MethodChannel/EventChannel 的高德定位后端：
 /// 通道与原生桥（android/.../AmapLocationBridge.kt）一一对应，
-/// 原生侧直连 Maven 的 com.amap.api:location（6.5.1）。
+/// 原生侧用高德定位 6.5.1 的类（由 app 的组合包依赖
+/// 3dmap-location-search 统一提供，版本同为 6.5.1）。
 ///
 /// 选这条自桥路线而非 vendoring 官方 amap_flutter_location：
 /// 所需面只有「隐私 + setApiKey + 单次/持续定位 + 停止」五件事，
