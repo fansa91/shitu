@@ -1,13 +1,14 @@
 package com.shitu.shitu
 
 import android.app.Activity
-import android.content.Context
 import android.os.Bundle
 import com.amap.api.maps.CameraUpdateFactory
 import com.amap.api.maps.MapsInitializer
 import com.amap.api.maps.TextureMapView
 import com.amap.api.maps.model.LatLng
 import com.amap.api.maps.model.MarkerOptions
+import java.io.File
+import java.io.FileOutputStream
 
 /**
  * 原生地图探针页（实验）：把 [TextureMapView] 直接挂在本 Activity 的
@@ -15,27 +16,37 @@ import com.amap.api.maps.model.MarkerOptions
  *
  * 探针二号（v0.3.2）：只换渲染器一个变量——SDK 由一号的地图组合包
  * 10.1.600（libAMapSDK_MAP）换成**导航 SDK 合包 9.8.3**
- * （libAMapSDK_NAVI_v9_8_3.so，flavor map3dnavisearchloc）。背景：
- * 地图线三个版本在 Flutter 嵌入与原生直挂两种承载下都死于 GL 首帧
- * （无弹窗秒退＝原生层硬崩），而 bmap 用导航线这份二进制在同一台
- * 一加 7 Pro 上能正常开图。承载、视图类（导航包内同名
- * TextureMapView）、运行时 Key 注入方式全部与一号保持不变。
- * SDK 的来源与选型见 app 的 build.gradle.kts 依赖注释（Maven 无
- * 9.8.3 导航合包，本地 jar 与 bmap 的二进制同源）。
+ * （libAMapSDK_NAVI_v9_8_3.so，flavor map3dnavisearchloc）。结果：
+ * 真机留痕仍停在 onResume 后首帧硬崩，与地图线死在同一位置。
+ *
+ * 探针三号（v0.3.3）：只换**进程环境**这一个变量——本 Activity 在
+ * Manifest 里声明 `android:process=":mapprobe"`，跑在独立进程。
+ * 依据：历次崩溃（Flutter 嵌入 × 地图线三版本、原生直挂 × 地图/
+ * 导航两渲染器）全发生在被 Flutter 引擎与高德定位组件初始化过的
+ * 宿主进程内，而 bmap 用同款二进制在同机能跑，它是纯净原生进程。
+ * 渲染器、视图类、运行时 Key 注入方式与二号全部不变；独立进程的
+ * 附带好处是探针硬崩不再带走主应用，用户回设置页即可读留痕。
+ * 进程安全核查：本应用无自定义 Application 类（Manifest 的
+ * applicationName 解析为 android.app.Application，onCreate 空
+ * 实现），插件注册与定位桥都只绑 MainActivity 的 FlutterEngine，
+ * 副进程不建引擎、不跑任何插件初始化，无需进程名守卫。
  *
  * Key 与目标点由 Dart 侧经 Intent extras 传入（运行时注入，严禁把
  * Key 写进 Manifest 或硬编码）。进入顺序：隐私三件套 →
  * [MapsInitializer.setApiKey] → 建图 → 地图加载完成回调里移相机并
  * 打标记。探针只做这一件事：不画路线、不做搜索。
  *
- * 结果留痕（分步）：每个阶段完成、下一阶段开始**前**，先把该阶段
- * 的完成标记写进 Flutter 的 SharedPreferences 文件（键名约定见
- * Dart 侧 native_map_probe.dart），地图加载成功写终态 `loaded`。
- * 若进程在某个阶段里硬崩，痕迹停在上一个完成标记，设置页据此
- * 判读死点区间：started → privacy_done → key_set → view_created →
- * oncreate_done → onresume_done → loaded，可区分死在构造期、
- * 生命周期还是首帧之后（一号只有 started/loaded 两态，死点不精，
- * 这是二号的改进点）。
+ * 结果留痕（分步，普通文件）：SharedPreferences 跨进程不可靠（副
+ * 进程写、主进程读可能读到旧值），三号起改写应用 files 目录下的
+ * 普通文件 `native_probe_trace`（路径约定见 Dart 侧
+ * native_map_probe.dart：Dart 的 ApplicationSupport 目录在安卓上
+ * 即 filesDir）。文件内容两行纯文本：第一行步骤名、第二行毫秒
+ * 时间戳；每步写完 flush + sync 再进下一步，若进程在某个阶段里
+ * 硬崩，痕迹停在上一个完成标记，设置页据此判读死点区间：
+ * started → privacy_done → key_set → view_created → oncreate_done
+ * → onresume_done → loaded，可区分死在构造期、生命周期还是首帧
+ * 之后。二号及更早写在 SharedPreferences 里的旧留痕键自三号起
+ * 弃用，Dart 侧不再读取（读不到留痕文件即按未试过处理）。
  *
  * 注意：本文件在本机无 Android SDK 未经编译，首编译在 CI 出包轮次；
  * 写时已按导航合包 jar 用 javap 逐项核对 MapsInitializer /
@@ -114,14 +125,20 @@ class NativeMapProbeActivity : Activity() {
         mapView?.onSaveInstanceState(outState)
     }
 
-    /** 状态写进 Flutter 的 SharedPreferences 文件（键带 flutter. 前缀）。 */
+    /**
+     * 状态写进 files 目录下的留痕文件（两行纯文本：步骤名 + 毫秒
+     * 时间戳），覆盖全量重写并同步落盘，保证硬崩前痕迹不丢。
+     * 本 Activity 跑在 :mapprobe 副进程、Dart 侧在主进程读同一文件，
+     * 文件是两边唯一可靠的跨进程介质。
+     */
     private fun writeProbeState(state: String) {
         try {
-            getSharedPreferences(FLUTTER_PREFS_NAME, Context.MODE_PRIVATE)
-                .edit()
-                .putString(PREF_KEY_STATE, state)
-                .putLong(PREF_KEY_UPDATED_AT, System.currentTimeMillis())
-                .apply()
+            val file = File(filesDir, TRACE_FILE_NAME)
+            FileOutputStream(file, false).use { out ->
+                out.write("$state\n${System.currentTimeMillis()}\n".toByteArray(Charsets.UTF_8))
+                out.flush()
+                out.fd.sync()
+            }
         } catch (e: Exception) {
             // 留痕失败不影响探针本体，静默。
         }
@@ -132,13 +149,10 @@ class NativeMapProbeActivity : Activity() {
         const val EXTRA_LATITUDE = "latitude"
         const val EXTRA_LONGITUDE = "longitude"
 
-        // 与 Dart 侧 shared_preferences 插件的存储约定对齐：
-        // 插件在安卓用名为 FlutterSharedPreferences 的文件、键自动加
-        // 「flutter.」前缀。Dart 侧以 native_probe_state /
-        // native_probe_updated_at 两个键读取。
-        private const val FLUTTER_PREFS_NAME = "FlutterSharedPreferences"
-        private const val PREF_KEY_STATE = "flutter.native_probe_state"
-        private const val PREF_KEY_UPDATED_AT = "flutter.native_probe_updated_at"
+        // 留痕文件名（与 Dart 侧 native_map_probe.dart 的约定一致，
+        // 勿改名）：位于应用 files 目录（Dart 侧 ApplicationSupport
+        // 目录在安卓上即此目录）。
+        private const val TRACE_FILE_NAME = "native_probe_trace"
 
         // 分步留痕的步骤名（与 Dart 侧判读约定一致，勿改名）：
         // 每阶段完成后落盘，loaded 为唯一成功终态。

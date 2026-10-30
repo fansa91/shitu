@@ -566,14 +566,14 @@ class _SettingsScreenState extends State<SettingsScreen>
                   ),
                 ),
               ),
-              // 原生地图探针入口（仅 Android）：独立原生 Activity 直挂
-              // TextureMapView，与瓦片底图是两条完全独立的路径，
-              // 只为验证原生高德地图能否在本机出图。
+              // 原生地图探针入口（仅 Android）：原生 Activity 直挂
+              // TextureMapView 并跑在独立进程，与瓦片底图是两条完全
+              // 独立的路径，只为验证原生高德地图能否在本机出图。
               if (defaultTargetPlatform == TargetPlatform.android)
                 Card(
                   child: ListTile(
                     leading: const Icon(Icons.science_outlined),
-                    title: const Text('原生地图探针（实验 · 导航 SDK 9.8.3）'),
+                    title: const Text('原生地图探针（实验 · 导航 SDK 9.8.3 · 独立进程）'),
                     subtitle: Text(
                       _probeStatus == null
                           ? '读取中…'

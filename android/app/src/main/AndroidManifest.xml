@@ -33,10 +33,16 @@
         <!-- 原生地图探针页（实验）：独立原生 Activity 直挂
              TextureMapView，绕开 Flutter 平台视图嵌入层验证原生
              高德地图能否在用户设备出图。Key 由 Dart 侧运行时经
-             Intent 传入，不写 Manifest。仅内部打开，不导出。 -->
+             Intent 传入，不写 Manifest。仅内部打开，不导出。
+             探针三号（v0.3.3）起跑在独立进程 :mapprobe：只换进程
+             环境这一个变量——与 bmap 的纯净原生进程对齐，且探针
+             进程硬崩不再带走主应用。本应用无自定义 Application
+             类（android.app.Application 空实现）、插件与定位桥只
+             绑 MainActivity 的引擎，副进程启动无重复初始化。 -->
         <activity
             android:name=".NativeMapProbeActivity"
             android:exported="false"
+            android:process=":mapprobe"
             android:label="原生地图探针" />
         <!-- 高德定位 SDK 的定位服务组件（官方接入要求声明；
              定位桥与组合包内的定位实现共用）。 -->
