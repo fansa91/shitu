@@ -7,10 +7,8 @@ import '../models/history_entry.dart';
 import '../models/map_provider.dart';
 import '../models/offline_route.dart';
 import '../models/poi.dart';
-import '../services/amap_sdk_service.dart';
 import '../services/history_service.dart';
 import '../services/location_service.dart';
-import '../services/map_crash_guard.dart';
 import '../services/map_data_services.dart';
 import '../services/places_service.dart';
 import '../services/settings_service.dart';
@@ -28,7 +26,7 @@ import 'settings_screen.dart';
 
 /// 主页：全屏地图 + 悬浮搜索栏 + 数据源芯片 + 右侧控件 + 底部面板。
 /// 宽度 >=900 时切换为左栏面板 + 右地图双栏。
-/// 底图满足条件时为真实高德地图，否则回退假地图（见 AppMap）。
+/// 底图为高德 Web 瓦片（flutter_map，见 AppMap），全平台统一。
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
     super.key,
@@ -37,7 +35,6 @@ class HomeScreen extends StatefulWidget {
     required this.places,
     required this.tracks,
     required this.history,
-    this.crashGuard,
   });
 
   final SettingsService settings;
@@ -46,8 +43,6 @@ class HomeScreen extends StatefulWidget {
   final TrackService tracks;
   final HistoryService history;
 
-  /// 地图崩溃面包屑/自保（可选）：透传给 AppMap 与各子页面。
-  final MapCrashGuard? crashGuard;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -61,72 +56,23 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Poi? _selectedPoi;
   bool _trafficOn = true;
-  bool _privacyPromptShown = false;
 
   /// 我的位置（GCJ-02），定位成功后有值。
   GeoPoint? _myLocation;
   bool _locating = false;
-  bool _is3d = false;
-  GeoPoint? _cameraCenter;
   StreamSubscription<GeoPoint>? _followSub;
 
   SettingsService get _settings => widget.settings;
   PlacesService get _places => widget.places;
-  double get _tilt => _is3d ? 58 : 0;
 
   @override
   void initState() {
     super.initState();
     _places.addListener(_onPlacesChanged);
     widget.history.addListener(_onPlacesChanged);
-    WidgetsBinding.instance
-        .addPostFrameCallback((_) => _initAmapWithPrivacy());
   }
 
   void _onPlacesChanged() {
-    if (mounted) setState(() {});
-  }
-
-  /// 隐私合规顺序：先征得用户同意，才允许初始化高德 SDK；
-  /// 不同意（或非移动端）则不初始化，地图全程回退假地图。
-  Future<void> _initAmapWithPrivacy() async {
-    if (!mounted) return;
-    if (_settings.privacyAgreed) {
-      await AmapSdkService.instance.initialize(_settings);
-      if (mounted) setState(() {});
-      return;
-    }
-    if (!AmapSdkService.instance.isMobilePlatform || _privacyPromptShown) {
-      return;
-    }
-    _privacyPromptShown = true;
-    final agreed = await showDialog<bool>(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => AlertDialog(
-            title: const Text('隐私与高德地图 SDK'),
-            content: const Text(
-              '识途使用高德地图 SDK 提供地图显示与定位服务，SDK 会按其隐私政策'
-              '收集设备与位置信息。只有你同意后，我们才会初始化地图 SDK 并'
-              '加载你在设置中填写的 SDK Key；不同意则使用示意地图，'
-              '搜索与算路（Web API）不受影响。',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('不同意'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('同意并继续'),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-    if (!agreed || !mounted) return;
-    await _settings.setPrivacyAgreed(true);
-    await AmapSdkService.instance.initialize(_settings);
     if (mounted) setState(() {});
   }
 
@@ -154,7 +100,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       setState(() => _myLocation = point);
       _followLock.lock();
-      _mapHandle.moveCamera(point, zoom: 16, tilt: _tilt);
+      _mapHandle.moveCamera(point, zoom: 16);
       _startFollowStream();
     } on LocationException catch (e) {
       if (mounted) _showLocationError(e);
@@ -169,7 +115,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (!mounted) return;
         setState(() => _myLocation = point);
         if (_followLock.following) {
-          _mapHandle.moveCamera(point, tilt: _tilt);
+          _mapHandle.moveCamera(point);
         }
       },
       onError: (Object e) {
@@ -205,11 +151,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  /// 地图停稳：记住中心，供 2D/3D 切换时保持视角。
-  void _onCameraSettled(GeoPoint center, double zoom) {
-    _cameraCenter = center;
-  }
-
   /// 用户手动拖图 → 解除跟随锁定（定位按钮随之变回未锁定态）。
   void _onUserDragged() {
     if (_followLock.following) {
@@ -218,24 +159,11 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// 实时路况：真实底图时切换高德路况图层（AppMap → AMapWidget.trafficEnabled）；
-  /// 示意地图（无 SDK Key / 未同意隐私 / 桌面端）没有路况图层，点按给明确说明，
-  /// 不假装已开启。
+  /// 实时路况：切换高德路况瓦片 overlay 图层（端点已实测可用，
+  /// 见 services/map_tiles.dart）；无路况数据的区域该图层为空。
   void _toggleTraffic() {
-    if (!AmapSdkService.instance.canShowRealMap(_settings)) {
-      _snack('实时路况需要高德底图：填入高德 SDK Key 并同意隐私后可用（当前为示意地图）');
-      return;
-    }
     setState(() => _trafficOn = !_trafficOn);
     _snack('实时路况${_trafficOn ? '已开' : '已关'}');
-  }
-
-  void _toggle3d() {
-    setState(() => _is3d = !_is3d);
-    final center = _cameraCenter ?? _myLocation ?? _selectedPoi?.location;
-    if (center != null) {
-      _mapHandle.moveCamera(center, tilt: _tilt);
-    }
   }
 
   // ---------- 导航 ----------
@@ -269,7 +197,6 @@ class _HomeScreenState extends State<HomeScreen> {
       MaterialPageRoute(
         builder: (_) => SettingsScreen(
           settings: _settings,
-          crashGuard: widget.crashGuard,
         ),
       ),
     );
@@ -286,7 +213,6 @@ class _HomeScreenState extends State<HomeScreen> {
           tracks: widget.tracks,
           history: widget.history,
           initialOrigin: initialOrigin,
-          crashGuard: widget.crashGuard,
         ),
       ),
     );
@@ -377,8 +303,7 @@ class _HomeScreenState extends State<HomeScreen> {
           builder: (_) => OfflineRouteScreen(
             route: result,
             settings: _settings,
-            crashGuard: widget.crashGuard,
-          ),
+            ),
         ),
       );
     } else if (result is NavTrack) {
@@ -387,8 +312,7 @@ class _HomeScreenState extends State<HomeScreen> {
           builder: (_) => TrackReplayScreen(
             track: result,
             settings: _settings,
-            crashGuard: widget.crashGuard,
-          ),
+            ),
         ),
       );
     }
@@ -399,9 +323,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      // 同时听自保状态：设置里点「重试真实地图」清掉自保后，
-      // 回到主页要立刻重建、重新尝试真实地图。
-      listenable: Listenable.merge([_settings, widget.crashGuard]),
+      listenable: _settings,
       builder: (context, _) {
         return Scaffold(
           body: LayoutBuilder(
@@ -422,9 +344,6 @@ class _HomeScreenState extends State<HomeScreen> {
       trafficEnabled: _trafficOn,
       handle: _mapHandle,
       myLocation: _myLocation,
-      tilt: _tilt,
-      crashGuard: widget.crashGuard,
-      onCameraSettled: _onCameraSettled,
       onUserDragged: _onUserDragged,
     );
   }
@@ -700,30 +619,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
             tooltip: following ? '正在跟随我的位置' : '回到我的位置',
             onPressed: _onLocate,
-          ),
-        ),
-        const SizedBox(height: 8),
-        // 2D / 3D 切换：到 3D 时显示「2D」表示可切回，态用主色区分。
-        Material(
-          elevation: 3,
-          borderRadius: BorderRadius.circular(12),
-          color: _is3d ? scheme.primary : scheme.surface,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: _toggle3d,
-            child: Container(
-              width: 48,
-              height: 48,
-              alignment: Alignment.center,
-              child: Text(
-                _is3d ? '3D' : '2D',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 15,
-                  color: _is3d ? scheme.onPrimary : scheme.onSurface,
-                ),
-              ),
-            ),
           ),
         ),
       ],

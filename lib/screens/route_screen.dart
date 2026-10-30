@@ -9,7 +9,6 @@ import '../models/route_plan.dart';
 import '../services/api_exception.dart';
 import '../services/history_service.dart';
 import '../services/location_service.dart';
-import '../services/map_crash_guard.dart';
 import '../services/map_data_services.dart';
 import '../services/places_service.dart';
 import '../services/settings_service.dart';
@@ -34,7 +33,6 @@ class RouteScreen extends StatefulWidget {
     required this.tracks,
     required this.history,
     this.initialOrigin,
-    this.crashGuard,
   });
 
   final Poi destination;
@@ -47,8 +45,6 @@ class RouteScreen extends StatefulWidget {
   /// 从历史路线进入时带入的起点；为 null 时默认 GPS 起点流程。
   final Poi? initialOrigin;
 
-  /// 地图崩溃面包屑/自保（可选）：透传给 AppMap。
-  final MapCrashGuard? crashGuard;
 
   @override
   State<RouteScreen> createState() => _RouteScreenState();
@@ -343,7 +339,6 @@ class _RouteScreenState extends State<RouteScreen> {
       settings: widget.settings,
       selectedRoutePoints: _selectedPoints,
       alternativeRoutePoints: _alternativePoints,
-      crashGuard: widget.crashGuard,
     );
   }
 

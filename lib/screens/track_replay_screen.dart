@@ -1,26 +1,22 @@
 import 'package:flutter/material.dart';
 
 import '../models/nav_track.dart';
-import '../services/map_crash_guard.dart';
 import '../services/settings_service.dart';
 import '../utils/format.dart';
 import '../widgets/app_map.dart';
 
 /// 轨迹回放：地图上画出导航时记录的实际轨迹折线 + 行程统计。
-/// 桌面/FakeMap 环境画示意线（AppMap 既有行为），真机高德底图画真实轨迹。
+/// 底图为高德 Web 瓦片（见 AppMap），轨迹折线画在瓦片之上。
 class TrackReplayScreen extends StatelessWidget {
   const TrackReplayScreen({
     super.key,
     required this.track,
     required this.settings,
-    this.crashGuard,
   });
 
   final NavTrack track;
   final SettingsService settings;
 
-  /// 地图崩溃面包屑/自保（可选）：透传给 AppMap。
-  final MapCrashGuard? crashGuard;
 
   @override
   Widget build(BuildContext context) {
@@ -35,7 +31,6 @@ class TrackReplayScreen extends StatelessWidget {
               settings: settings,
               selectedRoutePoints: track.points,
               showLocationDot: false,
-              crashGuard: crashGuard,
             ),
           ),
           Material(

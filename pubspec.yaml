@@ -38,25 +38,16 @@ dependencies:
   path_provider: ^2.1.5
   http: ^1.2.2
   dynamic_color: ^1.7.0
-  # 高德地图插件：官方 amap_flutter_map 3.0.0 + amap_flutter_base 3.0.0 的
-  # vendoring 版（源码在 packages/ 下），含「TextureMapView -> MapView」
-  # 等补丁，清单见各包内的 VENDORED.md。
-  amap_flutter_map:
-    path: packages/amap_flutter_map
-  amap_flutter_base:
-    path: packages/amap_flutter_base
+  # 底图：flutter_map + 高德 Web 瓦片（2026-10-30 起弃用高德原生 SDK，
+  # vendored 插件已停用，packages/ 仅留档，见各包 VENDORED.md 顶部注记）。
   package_info_plus: ^10.2.2
   url_launcher: ^6.3.3
   geolocator: ^14.1.2
   flutter_tts: ^4.2.5
   flutter_secure_storage: ^11.2.0
   share_plus: ^13.3.1
-dependency_overrides:
-  # vendored amap_flutter_map 的 android/build.gradle 写死 compileSdk 35；
-  # flutter_plugin_android_lifecycle 2.0.29+ 改用 flutter.compileSdkVersion(36)，
-  # 其 AAR 元数据要求消费方 compileSdk >= 36，会让 checkReleaseAarMetadata 失败。
-  # 2.0.26 仍是 compileSdk 35 且在插件 ^2.0.1 约束内，钉住它。
-  flutter_plugin_android_lifecycle: 2.0.26
+  flutter_map: ^8.3.2
+  latlong2: ^0.10.1
 
 dev_dependencies:
   flutter_test:

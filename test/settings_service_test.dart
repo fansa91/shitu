@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:shitu/models/map_provider.dart';
+import 'package:shitu/services/map_tiles.dart';
 import 'package:shitu/services/settings_service.dart';
 import 'package:shitu/theme/appearance.dart';
 
@@ -50,15 +51,15 @@ void main() {
     expect(reloaded.ttsPresynthesize, isFalse);
   });
 
-  test('地图兼容模式：默认关，存取往返', () async {
+  test('底图样式：默认标准，存取往返', () async {
     final service = SettingsService();
     await service.load();
-    expect(service.mapCompatMode, isFalse);
+    expect(service.mapBaseStyle, MapBaseStyle.standard);
 
-    await service.setMapCompatMode(true);
+    await service.setMapBaseStyle(MapBaseStyle.satellite);
     final reloaded = SettingsService();
     await reloaded.load();
-    expect(reloaded.mapCompatMode, isTrue);
+    expect(reloaded.mapBaseStyle, MapBaseStyle.satellite);
   });
 
   test('外观偏好：默认值与存取往返', () async {

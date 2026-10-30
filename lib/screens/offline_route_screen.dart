@@ -1,28 +1,24 @@
 import 'package:flutter/material.dart';
 
 import '../models/offline_route.dart';
-import '../services/map_crash_guard.dart';
 import '../services/settings_service.dart';
 import '../utils/format.dart';
 import '../widgets/app_map.dart';
 
 /// 离线路线详情：地图上画出保存的折线 + 摘要与分步文案。
 ///
-/// 诚实说明：保存的只有路线数据（折线/步骤/起终点），地图底图由高德 SDK
+/// 诚实说明：保存的只有路线数据（折线/步骤/起终点），地图底图由高德瓦片
 /// 实时加载，无网络时底图区域为空白，但路线信息本身可离线查看。
 class OfflineRouteScreen extends StatelessWidget {
   const OfflineRouteScreen({
     super.key,
     required this.route,
     required this.settings,
-    this.crashGuard,
   });
 
   final OfflineRoute route;
   final SettingsService settings;
 
-  /// 地图崩溃面包屑/自保（可选）：透传给 AppMap。
-  final MapCrashGuard? crashGuard;
 
   @override
   Widget build(BuildContext context) {
@@ -36,7 +32,6 @@ class OfflineRouteScreen extends StatelessWidget {
               settings: settings,
               selectedRoutePoints: route.points,
               showLocationDot: false,
-              crashGuard: crashGuard,
             ),
           ),
           Material(

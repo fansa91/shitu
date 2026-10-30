@@ -6,15 +6,20 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/map_provider.dart';
 import '../theme/appearance.dart';
+import 'map_tiles.dart';
 
 /// 应用设置：三家服务商 Key、当前服务商、TTS 偏好。
 ///
-/// 持久化分工：Key 类字段（四家 Web/SDK Key + 英伟达 Key）存
+/// 持久化分工：Key 类字段（三家 Web Key + 英伟达 Key）存
 /// flutter_secure_storage（Android Keystore / iOS Keychain），不落明文；
 /// 其余非敏感设置仍存 SharedPreferences。对外同步 getter 接口不变，
 /// 安全存储在 [load] 里异步读完并做一次性明文迁移（见 [_loadKeys]）。
 /// 安全存储不可用时（如无平台通道的测试环境）Key 仅内存生效，
 /// 绝不回退写明文。
+///
+/// 底图已于 2026-10-30 改为 Web 瓦片（不需要 Key），原先的高德原生
+/// SDK 双 Key、SDK 隐私同意、地图兼容模式字段已一并退役删除；旧版本
+/// 在安全存储/ prefs 里留下的对应值从此不再读取，自然失效。
 class SettingsService extends ChangeNotifier {
   SettingsService({FlutterSecureStorage? secureStorage})
       : _secure = secureStorage ?? const FlutterSecureStorage();
@@ -27,19 +32,13 @@ class SettingsService extends ChangeNotifier {
   static const _kKeyNvidia = 'key_nvidia';
   static const _kTtsEngine = 'tts_engine';
   static const _kTtsPresynthesize = 'tts_presynthesize';
-  static const _kAmapSdkAndroidKey = 'amap_sdk_android_key';
-  static const _kAmapSdkIosKey = 'amap_sdk_ios_key';
-  static const _kPrivacyAgreed = 'privacy_agreed';
   static const _kNvidiaVoice = 'nvidia_voice';
-  static const _kMapCompatMode = 'map_compat_mode';
+  static const _kMapBaseStyle = 'map_base_style';
   static const _kThemeMode = 'theme_mode';
   static const _kDynamicColor = 'dynamic_color_enabled';
   static const _kSeedColorValue = 'seed_color_value';
 
   MapProvider _provider = MapProvider.amap;
-  String _amapSdkAndroidKey = '';
-  String _amapSdkIosKey = '';
-  bool _privacyAgreed = false;
   final Map<MapProvider, String> _keys = {
     for (final p in MapProvider.values) p: '',
   };
@@ -47,24 +46,13 @@ class SettingsService extends ChangeNotifier {
   String _nvidiaVoice = 'Siwei';
   TtsEngine _ttsEngine = TtsEngine.system;
   bool _ttsPresynthesize = true;
-  bool _mapCompatMode = false;
+  MapBaseStyle _mapBaseStyle = MapBaseStyle.standard;
   AppThemeMode _themeMode = AppThemeMode.system;
   bool _dynamicColorEnabled = true;
   int _seedColorValue = 0xFF1A73E8; // brandSeedColor 的 ARGB
 
   MapProvider get provider => _provider;
 
-  /// 高德原生 SDK 的 Android Key（与 Web Key 分开申请、分开填）。
-  String get amapSdkAndroidKey => _amapSdkAndroidKey;
-
-  /// 高德原生 SDK 的 iOS Key。
-  String get amapSdkIosKey => _amapSdkIosKey;
-
-  bool get hasAmapSdkAndroidKey => _amapSdkAndroidKey.trim().isNotEmpty;
-  bool get hasAmapSdkIosKey => _amapSdkIosKey.trim().isNotEmpty;
-
-  /// 用户是否已在首启隐私对话框中同意（同意前绝不初始化地图 SDK）。
-  bool get privacyAgreed => _privacyAgreed;
   TtsEngine get ttsEngine => _ttsEngine;
   bool get ttsPresynthesize => _ttsPresynthesize;
   String get nvidiaKey => _nvidiaKey;
@@ -72,9 +60,8 @@ class SettingsService extends ChangeNotifier {
   /// 英伟达音色短名（见 tts_service.nvidiaVoiceNames），默认 Siwei。
   String get nvidiaVoice => _nvidiaVoice;
 
-  /// 地图兼容模式：开时 AMapWidget 只用最保守渲染配置（关建筑/路况/
-  /// 指南针/比例尺/标注/POI 点击），供真实地图崩溃或老设备时排查与保底。
-  bool get mapCompatMode => _mapCompatMode;
+  /// 底图样式（瓦片图层组合）：标准 / 卫星，AppMap 据此切换瓦片模板。
+  MapBaseStyle get mapBaseStyle => _mapBaseStyle;
 
   /// 外观：主题模式 / 是否跟随系统动态取色 / 自定义种子色。
   AppThemeMode get themeMode => _themeMode;
@@ -94,8 +81,6 @@ class SettingsService extends ChangeNotifier {
     _kKeyBaidu,
     _kKeyTencent,
     _kKeyNvidia,
-    _kAmapSdkAndroidKey,
-    _kAmapSdkIosKey,
   ];
 
   Future<void> load() async {
@@ -104,8 +89,7 @@ class SettingsService extends ChangeNotifier {
     _nvidiaVoice = prefs.getString(_kNvidiaVoice) ?? 'Siwei';
     _ttsEngine = _ttsFromName(prefs.getString(_kTtsEngine));
     _ttsPresynthesize = prefs.getBool(_kTtsPresynthesize) ?? true;
-    _privacyAgreed = prefs.getBool(_kPrivacyAgreed) ?? false;
-    _mapCompatMode = prefs.getBool(_kMapCompatMode) ?? false;
+    _mapBaseStyle = _mapBaseStyleFromName(prefs.getString(_kMapBaseStyle));
     _themeMode = _themeModeFromName(prefs.getString(_kThemeMode));
     _dynamicColorEnabled = prefs.getBool(_kDynamicColor) ?? true;
     _seedColorValue = prefs.getInt(_kSeedColorValue) ?? _seedColorValue;
@@ -152,8 +136,6 @@ class SettingsService extends ChangeNotifier {
     _keys[MapProvider.baidu] = resolved[_kKeyBaidu] ?? '';
     _keys[MapProvider.tencent] = resolved[_kKeyTencent] ?? '';
     _nvidiaKey = resolved[_kKeyNvidia] ?? '';
-    _amapSdkAndroidKey = resolved[_kAmapSdkAndroidKey] ?? '';
-    _amapSdkIosKey = resolved[_kAmapSdkIosKey] ?? '';
   }
 
   /// 写安全存储：空值删除；失败静默（仅内存生效，绝不回退明文）。
@@ -169,29 +151,11 @@ class SettingsService extends ChangeNotifier {
     }
   }
 
-  Future<void> setAmapSdkKeys({
-    required String androidKey,
-    required String iosKey,
-  }) async {
-    _amapSdkAndroidKey = androidKey.trim();
-    _amapSdkIosKey = iosKey.trim();
-    notifyListeners();
-    await _writeSecure(_kAmapSdkAndroidKey, _amapSdkAndroidKey);
-    await _writeSecure(_kAmapSdkIosKey, _amapSdkIosKey);
-  }
-
-  Future<void> setPrivacyAgreed(bool value) async {
-    _privacyAgreed = value;
+  Future<void> setMapBaseStyle(MapBaseStyle value) async {
+    _mapBaseStyle = value;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_kPrivacyAgreed, value);
-  }
-
-  Future<void> setMapCompatMode(bool value) async {
-    _mapCompatMode = value;
-    notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_kMapCompatMode, value);
+    await prefs.setString(_kMapBaseStyle, value.name);
   }
 
   Future<void> setProvider(MapProvider value) async {
@@ -272,4 +236,8 @@ class SettingsService extends ChangeNotifier {
   AppThemeMode _themeModeFromName(String? name) =>
       AppThemeMode.values.where((e) => e.name == name).firstOrNull ??
       AppThemeMode.system;
+
+  MapBaseStyle _mapBaseStyleFromName(String? name) =>
+      MapBaseStyle.values.where((e) => e.name == name).firstOrNull ??
+      MapBaseStyle.standard;
 }

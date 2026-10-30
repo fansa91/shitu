@@ -14,7 +14,6 @@ void main() {
     SharedPreferences.setMockInitialValues({
       'key_amap': 'legacy-amap-key',
       'key_nvidia': 'legacy-nvapi-key',
-      'amap_sdk_android_key': 'legacy-sdk-key',
       'provider': 'baidu', // 非敏感设置不受迁移影响
     });
     final secure = installSecureStorageMock();
@@ -24,19 +23,16 @@ void main() {
 
     expect(service.keyFor(MapProvider.amap), 'legacy-amap-key');
     expect(service.nvidiaKey, 'legacy-nvapi-key');
-    expect(service.amapSdkAndroidKey, 'legacy-sdk-key');
     expect(service.provider, MapProvider.baidu);
 
     // 已搬进安全存储
     expect(secure['key_amap'], 'legacy-amap-key');
     expect(secure['key_nvidia'], 'legacy-nvapi-key');
-    expect(secure['amap_sdk_android_key'], 'legacy-sdk-key');
 
     // 旧明文已删除，非敏感项保留
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString('key_amap'), isNull);
     expect(prefs.getString('key_nvidia'), isNull);
-    expect(prefs.getString('amap_sdk_android_key'), isNull);
     expect(prefs.getString('provider'), 'baidu');
   });
 
@@ -60,13 +56,8 @@ void main() {
     final service = SettingsService();
     await service.load();
     await service.setKeyFor(MapProvider.tencent, 'tencent-key-1');
-    await service.setAmapSdkKeys(androidKey: 'sdk-a', iosKey: 'sdk-i');
-
     expect(secure['key_tencent'], 'tencent-key-1');
-    expect(secure['amap_sdk_android_key'], 'sdk-a');
-    expect(secure['amap_sdk_ios_key'], 'sdk-i');
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString('key_tencent'), isNull);
-    expect(prefs.getString('amap_sdk_android_key'), isNull);
   });
 }

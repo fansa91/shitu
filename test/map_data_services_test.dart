@@ -42,26 +42,4 @@ void main() {
     });
   });
 
-  group('设置新增字段持久化', () {
-    test('高德 SDK 双 Key 与隐私同意往返', () async {
-      SharedPreferences.setMockInitialValues({});
-      final settings = SettingsService();
-      await settings.load();
-      expect(settings.privacyAgreed, isFalse);
-      await settings.setAmapSdkKeys(
-        androidKey: ' android-sdk-key ',
-        iosKey: 'ios-sdk-key',
-      );
-      await settings.setPrivacyAgreed(true);
-      expect(settings.amapSdkAndroidKey, 'android-sdk-key'); // 已 trim
-      expect(settings.amapSdkIosKey, 'ios-sdk-key');
-      expect(settings.hasAmapSdkAndroidKey, isTrue);
-
-      final reloaded = SettingsService();
-      await reloaded.load();
-      expect(reloaded.amapSdkAndroidKey, 'android-sdk-key');
-      expect(reloaded.amapSdkIosKey, 'ios-sdk-key');
-      expect(reloaded.privacyAgreed, isTrue);
-    });
-  });
 }

@@ -42,8 +42,6 @@ void main() {
     expect(find.text('公司'), findsOneWidget);
     expect(find.text('收藏'), findsOneWidget);
     expect(find.text('离线路线'), findsOneWidget);
-    // 地图控制区：定位与 2D/3D 切换
-    expect(find.text('2D'), findsOneWidget);
     // 无 Key 时显示引导卡
     expect(find.text('还没有填写任何 Key'), findsOneWidget);
   });

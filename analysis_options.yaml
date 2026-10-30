@@ -17,6 +17,9 @@ analyzer:
     - windows/**
     - macos/**
     - linux/**
+    # packages/ 是已停用的高德原生插件 vendoring 留档（2026-10-30 底图
+    # 改瓦片后不再被 pubspec 引用），不纳入主工程分析。
+    - packages/**
 
 linter:
   # The lint rules applied to this project can be customized in the

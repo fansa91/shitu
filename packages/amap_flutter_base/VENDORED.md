@@ -1,3 +1,5 @@
+> **已停用（2026-10-30）**：识途底图已切换为 flutter_map + 高德 Web 瓦片（见 lib/widgets/tile_map_view.dart 与 lib/services/map_tiles.dart），本 vendored 插件自此不再被 pubspec 引用，保留在仓内仅作历史留档，勿再基于它开发。
+
 # Vendored: amap_flutter_base 3.0.0
 
 来源：pub.dev 官方存档 `amap_flutter_base-3.0.0.tar.gz`（高德官方基础库，
