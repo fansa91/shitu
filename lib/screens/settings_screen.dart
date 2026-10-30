@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import '../models/located_fix.dart';
 import '../models/map_provider.dart';
 import '../theme/appearance.dart';
 import '../utils/external_link.dart';
 import '../utils/format.dart';
 import '../services/api_exception.dart';
 import '../services/app_signature_service.dart';
+import '../services/location_guard.dart';
+import '../services/location_runtime_status.dart';
 import '../services/map_data_services.dart';
 import '../services/map_tiles.dart';
 import '../services/settings_service.dart';
@@ -19,7 +22,6 @@ class SettingsScreen extends StatefulWidget {
 
   final SettingsService settings;
 
-
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
@@ -27,11 +29,17 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   /// 固定发布 keystore 的证书 SHA1 指纹（公开值，非密码）：与仓库 Secrets
   /// 中 ANDROID_KEYSTORE_BASE64 对应的那把钥匙一致，换钥匙时同步更新这里。
-  static const _releaseSha1 = '60:15:40:F1:35:0A:61:37:F5:3E:6E:1C:C6:A3:1F:92:55:DA:F8:5D';
+  static const _releaseSha1 =
+      '60:15:40:F1:35:0A:61:37:F5:3E:6E:1C:C6:A3:1F:92:55:DA:F8:5D';
   static const _packageName = 'com.shitu.app';
 
   final Map<MapProvider, TextEditingController> _keyControllers = {};
   final _nvidiaController = TextEditingController();
+  final _amapSdkController = TextEditingController();
+
+  /// 高德定位崩溃守卫（与定位服务共用同一份存储，见 location_guard.dart）。
+  final _locationGuard = AmapLocationGuard();
+  bool _locationGuardTripped = false;
   final Map<String, String> _testResults = {};
   final Set<String> _testing = {};
 
@@ -41,12 +49,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     for (final p in MapProvider.values) {
-      _keyControllers[p] =
-          TextEditingController(text: _settings.keyFor(p));
+      _keyControllers[p] = TextEditingController(text: _settings.keyFor(p));
     }
     _nvidiaController.text = _settings.nvidiaKey;
+    _amapSdkController.text = _settings.amapSdkAndroidKey;
     _loadVersion();
     _loadRuntimeSignature();
+    _loadGuardState();
+  }
+
+  Future<void> _loadGuardState() async {
+    final tripped = await _locationGuard.isTripped();
+    if (!mounted) return;
+    setState(() => _locationGuardTripped = tripped);
   }
 
   /// 试听专用系统 TTS 实例（独立于导航页的实例，探活结果可复用）。
@@ -60,7 +75,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final info = await PackageInfo.fromPlatform();
       if (!mounted) return;
       setState(
-          () => _versionText = formatAppVersion(info.version, info.buildNumber));
+        () => _versionText = formatAppVersion(info.version, info.buildNumber),
+      );
     } catch (_) {
       if (!mounted) return;
       setState(() => _versionText = '版本未知');
@@ -87,6 +103,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       c.dispose();
     }
     _nvidiaController.dispose();
+    _amapSdkController.dispose();
     super.dispose();
   }
 
@@ -167,7 +184,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   /// 系统语音试听（含英伟达回落）：等播完/报错才给反馈；
   /// 中文语音数据缺失时改播一句英文确认引擎本身能出声。
-  Future<void> _speakPreviewSample(String sample, TtsReadiness readiness) async {
+  Future<void> _speakPreviewSample(
+    String sample,
+    TtsReadiness readiness,
+  ) async {
     if (readiness.warning != null) {
       _snack(readiness.warning!);
       await _previewTts.speakAndWait(
@@ -230,7 +250,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           value: p,
                           title: Text(p.displayName),
                           subtitle: Text(
-                              _settings.hasKeyFor(p) ? 'Key 已填写' : 'Key 未填写'),
+                            _settings.hasKeyFor(p) ? 'Key 已填写' : 'Key 未填写',
+                          ),
                         ),
                     ],
                   ),
@@ -243,8 +264,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   children: [
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
-                      child: Text('主题模式',
-                          style: Theme.of(context).textTheme.titleSmall),
+                      child: Text(
+                        '主题模式',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
                     ),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
@@ -264,14 +287,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     SwitchListTile(
                       title: const Text('动态取色'),
                       subtitle: const Text(
-                          '跟随系统壁纸配色（Android 12+）；系统无动态配色时使用下方主题色'),
+                        '跟随系统壁纸配色（Android 12+）；系统无动态配色时使用下方主题色',
+                      ),
                       value: _settings.dynamicColorEnabled,
                       onChanged: _settings.setDynamicColorEnabled,
                     ),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 6, 16, 2),
-                      child: Text('主题色',
-                          style: Theme.of(context).textTheme.titleSmall),
+                      child: Text(
+                        '主题色',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
                     ),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 2, 16, 14),
@@ -279,8 +305,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         spacing: 12,
                         runSpacing: 10,
                         children: [
-                          for (final opt in seedOptions)
-                            _seedSwatch(opt),
+                          for (final opt in seedOptions) _seedSwatch(opt),
                         ],
                       ),
                     ),
@@ -308,8 +333,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Text('底图来源',
-                          style: Theme.of(context).textTheme.titleSmall),
+                      Text(
+                        '底图来源',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
                       const SizedBox(height: 8),
                       SegmentedButton<MapTileSource>(
                         segments: [
@@ -324,8 +351,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             _settings.setMapTileSource(s.first),
                       ),
                       const SizedBox(height: 14),
-                      Text('底图样式',
-                          style: Theme.of(context).textTheme.titleSmall),
+                      Text(
+                        '底图样式',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
                       const SizedBox(height: 8),
                       SegmentedButton<MapBaseStyle>(
                         segments: [
@@ -353,6 +382,103 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
               ),
+              _sectionTitle('高德定位'),
+              _keyCard(
+                id: 'amap_sdk',
+                title: '高德 Android SDK Key（仅定位用）',
+                controller: _amapSdkController,
+                filled: _settings.hasAmapSdkAndroidKey,
+                getKeyUrl: KeyConsoleUrls.forProvider(MapProvider.amap),
+                onSave: () async {
+                  await _settings.setAmapSdkAndroidKey(_amapSdkController.text);
+                  _snack('高德 SDK Key 已保存（供 Android 高德定位）');
+                },
+              ),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        '定位源',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 8),
+                      SegmentedButton<LocationSourceMode>(
+                        segments: [
+                          for (final m in LocationSourceMode.values)
+                            ButtonSegment<LocationSourceMode>(
+                              value: m,
+                              label: Text(m.label),
+                            ),
+                        ],
+                        selected: {_settings.locationSourceMode},
+                        onSelectionChanged: (s) =>
+                            _settings.setLocationSourceMode(s.first),
+                      ),
+                      const SizedBox(height: 6),
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('同意高德隐私政策'),
+                        subtitle: const Text(
+                          '使用高德定位前必须同意；未同意时不会初始化高德定位 SDK。',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                        value: _settings.privacyAgreed,
+                        onChanged: (v) => _settings.setPrivacyAgreed(v),
+                      ),
+                      const Divider(height: 8),
+                      ListenableBuilder(
+                        listenable: LocationRuntimeStatus.instance,
+                        builder: (context, _) {
+                          final status = LocationRuntimeStatus.instance;
+                          final active = status.activeSource;
+                          return Text(
+                            active == null
+                                ? '当前生效定位源：尚未定位'
+                                : '当前生效定位源：${active.label}'
+                                      '${status.note == null ? '' : '（${status.note}）'}',
+                            style: const TextStyle(fontSize: 12.5),
+                          );
+                        },
+                      ),
+                      if (_locationGuardTripped) ...[
+                        const Padding(
+                          padding: EdgeInsets.only(top: 8),
+                          child: Text(
+                            '上次启动高德定位时进程异常结束，守卫已自动跳过高德定位。'
+                            '如判断是误报，可手动重试一次。',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                        ),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton(
+                            onPressed: () async {
+                              await _locationGuard.resetByUser();
+                              LocationRuntimeStatus.instance.reportNote(null);
+                              await _loadGuardState();
+                              _snack('已复位守卫，下次定位将重新尝试高德');
+                            },
+                            child: const Text('重试高德定位'),
+                          ),
+                        ),
+                      ],
+                      const Padding(
+                        padding: EdgeInsets.only(top: 10),
+                        child: Text(
+                          '高德定位仅 Android 可用：直接给出 GCJ-02 坐标，'
+                          '国内 WiFi/基站定位比系统定位快；iOS 与桌面端'
+                          '自动使用系统定位。自动模式下高德失败或首定超时'
+                          '（约 8 秒）会自动回落系统定位。',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
               _keyCard(
                 id: 'nvidia',
                 title: '英伟达 TTS Key（可选）',
@@ -368,8 +494,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               Card(
                 child: ExpansionTile(
                   title: const Text('如何申请各家 Key'),
-                  childrenPadding:
-                      const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                   children: [
                     const Align(
                       alignment: Alignment.centerLeft,
@@ -508,9 +633,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       padding: const EdgeInsets.fromLTRB(4, 18, 4, 8),
       child: Text(
         text,
-        style: Theme.of(context)
-            .textTheme
-            .titleSmall
+        style: Theme.of(context).textTheme.titleSmall
             ?.copyWith(color: Theme.of(context).colorScheme.primary),
       ),
     );
@@ -520,8 +643,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Row(
       children: [
         Expanded(
-          child: Text('$label：$value',
-              style: const TextStyle(fontSize: 12.5)),
+          child: Text('$label：$value', style: const TextStyle(fontSize: 12.5)),
         ),
         IconButton(
           icon: const Icon(Icons.copy_outlined, size: 18),
@@ -552,8 +674,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Row(
               children: [
                 Expanded(
-                  child: Text(title,
-                      style: Theme.of(context).textTheme.titleSmall),
+                  child: Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
                 ),
                 Container(
                   width: 9,
@@ -566,8 +690,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
                 const SizedBox(width: 6),
-                Text(filled ? '已填写' : '未填写',
-                    style: Theme.of(context).textTheme.bodySmall),
+                Text(
+                  filled ? '已填写' : '未填写',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
               ],
             ),
             const SizedBox(height: 10),
@@ -583,16 +709,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 10),
             Row(
               children: [
-                FilledButton.tonal(
-                  onPressed: onSave,
-                  child: const Text('保存'),
-                ),
+                FilledButton.tonal(onPressed: onSave, child: const Text('保存')),
                 const SizedBox(width: 8),
                 OutlinedButton(
                   onPressed: _testing.contains(id)
                       ? null
-                      : (onTest ??
-                          () => _testLocalFormat(id, controller.text)),
+                      : (onTest ?? () => _testLocalFormat(id, controller.text)),
                   child: Text(_testing.contains(id) ? '测试中…' : '测试连接'),
                 ),
               ],
@@ -604,8 +726,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: Text(
                   result,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ),
           ],

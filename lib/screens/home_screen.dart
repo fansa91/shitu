@@ -43,7 +43,6 @@ class HomeScreen extends StatefulWidget {
   final TrackService tracks;
   final HistoryService history;
 
-
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
@@ -51,7 +50,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final _sheetController = DraggableScrollableController();
   final _mapHandle = MapHandle();
-  final _locationService = LocationService();
+  late final LocationService _locationService;
   final _followLock = FollowLock();
 
   Poi? _selectedPoi;
@@ -68,6 +67,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _locationService = LocationService(settings: widget.settings);
     _places.addListener(_onPlacesChanged);
     widget.history.addListener(_onPlacesChanged);
   }
@@ -145,8 +145,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 },
               )
             : e.kind == LocationErrorKind.permissionDenied
-                ? SnackBarAction(label: '重试', onPressed: _onLocate)
-                : null,
+            ? SnackBarAction(label: '重试', onPressed: _onLocate)
+            : null,
       ),
     );
   }
@@ -199,11 +199,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _openSettings() {
     Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => SettingsScreen(
-          settings: _settings,
-        ),
-      ),
+      MaterialPageRoute(builder: (_) => SettingsScreen(settings: _settings)),
     );
   }
 
@@ -305,19 +301,14 @@ class _HomeScreenState extends State<HomeScreen> {
     } else if (result is OfflineRoute) {
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => OfflineRouteScreen(
-            route: result,
-            settings: _settings,
-            ),
+          builder: (_) =>
+              OfflineRouteScreen(route: result, settings: _settings),
         ),
       );
     } else if (result is NavTrack) {
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => TrackReplayScreen(
-            track: result,
-            settings: _settings,
-            ),
+          builder: (_) => TrackReplayScreen(track: result, settings: _settings),
         ),
       );
     }
@@ -395,11 +386,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ),
-        Positioned(
-          right: 14,
-          top: 190,
-          child: _mapControls(context),
-        ),
+        Positioned(right: 14, top: 190, child: _mapControls(context)),
         if (!_settings.hasAnyKey)
           Positioned(
             left: 16,
@@ -417,8 +404,9 @@ class _HomeScreenState extends State<HomeScreen> {
           builder: (context, scrollController) {
             return Material(
               elevation: 8,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(24)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(24),
+              ),
               color: Theme.of(context).colorScheme.surface,
               child: Column(
                 children: [
@@ -495,8 +483,10 @@ class _HomeScreenState extends State<HomeScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
           child: Row(
             children: [
-              Icon(Icons.search,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant),
+              Icon(
+                Icons.search,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
               const SizedBox(width: 10),
               const Expanded(
                 child: Text(
@@ -571,8 +561,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _mapControls(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    Widget btn(IconData icon, String tip, VoidCallback onTap,
-        {bool active = false}) {
+    Widget btn(
+      IconData icon,
+      String tip,
+      VoidCallback onTap, {
+      bool active = false,
+    }) {
       return Material(
         elevation: 3,
         borderRadius: BorderRadius.circular(12),
@@ -588,8 +582,12 @@ class _HomeScreenState extends State<HomeScreen> {
     final following = _followLock.following;
     return Column(
       children: [
-        btn(Icons.layers_outlined, '实时路况', _toggleTraffic,
-            active: _trafficOn && _settings.mapTileSource.supportsTraffic),
+        btn(
+          Icons.layers_outlined,
+          '实时路况',
+          _toggleTraffic,
+          active: _trafficOn && _settings.mapTileSource.supportsTraffic,
+        ),
         const SizedBox(height: 8),
         btn(Icons.add, '放大', () => _mapHandle.zoomIn()),
         const SizedBox(height: 8),
@@ -614,13 +612,13 @@ class _HomeScreenState extends State<HomeScreen> {
                     following
                         ? Icons.my_location
                         : _myLocation != null
-                            ? Icons.gps_fixed
-                            : Icons.location_searching,
+                        ? Icons.gps_fixed
+                        : Icons.location_searching,
                     color: following
                         ? scheme.onPrimary
                         : _myLocation != null
-                            ? scheme.primary
-                            : null,
+                        ? scheme.primary
+                        : null,
                   ),
             tooltip: following ? '正在跟随我的位置' : '回到我的位置',
             onPressed: _onLocate,
@@ -639,15 +637,11 @@ class _HomeScreenState extends State<HomeScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('还没有填写任何 Key',
-                style: Theme.of(context).textTheme.titleMedium),
+            Text('还没有填写任何 Key', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 6),
             const Text('填入 Web Key 即可开始搜索与算路，Key 由你自己申请、只存在本机。'),
             const SizedBox(height: 10),
-            FilledButton(
-              onPressed: _openSettings,
-              child: const Text('去设置 →'),
-            ),
+            FilledButton(onPressed: _openSettings, child: const Text('去设置 →')),
           ],
         ),
       ),
@@ -748,17 +742,16 @@ class _HomeScreenState extends State<HomeScreen> {
         const SizedBox(height: 6),
         Text(
           '长按「家 / 公司」可清除或重新设置；离线路线只含路线数据，底图需联网',
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
+          style: Theme.of(context).textTheme.bodySmall
+              ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
         ),
         const SizedBox(height: 10),
         if (widget.history.searches.isEmpty && widget.history.routes.isEmpty)
           Text(
             '暂无历史记录，搜索与算路后会出现在这里',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
         if (widget.history.searches.isNotEmpty) ...[
           _historyHeader(context, '最近搜索', widget.history.clearSearches),
@@ -771,7 +764,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 entry.poi.distanceMeters == null
                     ? entry.poi.address
                     : '${entry.poi.address} · '
-                        '${formatDistance(entry.poi.distanceMeters!)}',
+                          '${formatDistance(entry.poi.distanceMeters!)}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -790,7 +783,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 overflow: TextOverflow.ellipsis,
               ),
               subtitle: Text(
-                  '${entry.mode.displayName} · ${entry.provider.displayName}'),
+                '${entry.mode.displayName} · ${entry.provider.displayName}',
+              ),
               onTap: () => _openRouteHistory(entry),
             ),
         ],
@@ -808,10 +802,7 @@ class _HomeScreenState extends State<HomeScreen> {
         Expanded(
           child: Text(title, style: Theme.of(context).textTheme.titleSmall),
         ),
-        TextButton(
-          onPressed: onClear,
-          child: const Text('清空'),
-        ),
+        TextButton(onPressed: onClear, child: const Text('清空')),
       ],
     );
   }

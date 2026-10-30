@@ -53,7 +53,7 @@ class NavigationScreen extends StatefulWidget {
 }
 
 class _NavigationScreenState extends State<NavigationScreen> {
-  final _locationService = LocationService();
+  late final LocationService _locationService;
   late final TtsService _tts;
   late final NavigationController _nav;
   StreamSubscription<LocatedFix>? _fixSub;
@@ -67,13 +67,13 @@ class _NavigationScreenState extends State<NavigationScreen> {
   bool _rerouting = false;
   RouteOption? _rerouteCandidate;
 
-  String get _voiceLabel => widget.settings.ttsEngine == TtsEngine.nvidia
-      ? '语音 · 英伟达'
-      : '语音 · 系统';
+  String get _voiceLabel =>
+      widget.settings.ttsEngine == TtsEngine.nvidia ? '语音 · 英伟达' : '语音 · 系统';
 
   @override
   void initState() {
     super.initState();
+    _locationService = LocationService(settings: widget.settings);
     _tts = createTtsService(
       engine: widget.settings.ttsEngine,
       nvidiaKey: widget.settings.nvidiaKey,
@@ -136,11 +136,9 @@ class _NavigationScreenState extends State<NavigationScreen> {
     _simTimer = Timer.periodic(const Duration(milliseconds: 400), (_) {
       _simAlong += avgSpeed * 6 * 0.4;
       final point = pointAtDistance(points, cumulative, _simAlong);
-      _nav.updatePosition(LocatedFix(
-        point: point,
-        at: DateTime.now(),
-        speedMps: avgSpeed,
-      ));
+      _nav.updatePosition(
+        LocatedFix(point: point, at: DateTime.now(), speedMps: avgSpeed),
+      );
       if (_simAlong >= cumulative.last) _simTimer?.cancel();
     });
   }
@@ -152,9 +150,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
       _summaryShown = true;
       _finishFlow();
     }
-    if (_nav.rerouteSuggested &&
-        _rerouteCandidate == null &&
-        !_rerouting) {
+    if (_nav.rerouteSuggested && _rerouteCandidate == null && !_rerouting) {
       _computeReroute();
     }
   }
@@ -164,7 +160,9 @@ class _NavigationScreenState extends State<NavigationScreen> {
     if (current == null) return;
     _rerouting = true;
     try {
-      final plan = await widget.services.serviceFor(widget.provider).planRoute(
+      final plan = await widget.services
+          .serviceFor(widget.provider)
+          .planRoute(
             origin: Poi(
               id: 'gps-reroute',
               name: '我的位置',
@@ -180,7 +178,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
       setState(() {
         _rerouteCandidate =
             plan.options.where((o) => o.recommended).firstOrNull ??
-                plan.options.firstOrNull;
+            plan.options.firstOrNull;
       });
     } catch (_) {
       // 重规划失败：当作忽略处理，进入冷却，避免反复弹。
@@ -257,9 +255,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
         _snack('轨迹点太少，未保存');
       }
     } else if (action == 'share') {
-      await SharePlus.instance.share(
-        ShareParams(text: _summaryText(summary)),
-      );
+      await SharePlus.instance.share(ShareParams(text: _summaryText(summary)));
     }
     if (mounted) Navigator.of(context).pop();
   }
@@ -359,14 +355,14 @@ class _NavigationScreenState extends State<NavigationScreen> {
                   color: const Color(0xFF0D5C46),
                   borderRadius: BorderRadius.circular(18),
                 ),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
                 child: Row(
                   children: [
                     Icon(
-                      _nav.arrived
-                          ? Icons.flag
-                          : _turnIcon(next?.direction),
+                      _nav.arrived ? Icons.flag : _turnIcon(next?.direction),
                       color: Colors.white,
                       size: 44,
                     ),
@@ -379,8 +375,8 @@ class _NavigationScreenState extends State<NavigationScreen> {
                             _nav.arrived
                                 ? '已到达'
                                 : distToNext != null
-                                    ? formatDistance(distToNext)
-                                    : formatDistance(_nav.remainingMeters),
+                                ? formatDistance(distToNext)
+                                : formatDistance(_nav.remainingMeters),
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 25,
@@ -394,7 +390,9 @@ class _NavigationScreenState extends State<NavigationScreen> {
                                 ? '已到达「${widget.destinationName}」附近'
                                 : next?.instruction ?? '继续直行',
                             style: const TextStyle(
-                                color: Color(0xFFC9ECDF), fontSize: 14),
+                              color: Color(0xFFC9ECDF),
+                              fontSize: 14,
+                            ),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -416,8 +414,10 @@ class _NavigationScreenState extends State<NavigationScreen> {
                 color: const Color(0xFFFDF3D7),
                 borderRadius: BorderRadius.circular(13),
                 child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
                   child: Row(
                     children: [
                       Expanded(
@@ -425,7 +425,9 @@ class _NavigationScreenState extends State<NavigationScreen> {
                           '已偏离原路线，新路线 ${formatDuration(_rerouteCandidate!.durationSeconds)} · '
                           '${formatDistance(_rerouteCandidate!.distanceMeters)}',
                           style: const TextStyle(
-                              fontSize: 12.5, color: Color(0xFF7A5B00)),
+                            fontSize: 12.5,
+                            color: Color(0xFF7A5B00),
+                          ),
                         ),
                       ),
                       TextButton(
@@ -477,14 +479,17 @@ class _NavigationScreenState extends State<NavigationScreen> {
                   Text(
                     speed == null ? '--' : '${speed.round()}',
                     style: const TextStyle(
-                        fontSize: 19,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF17233B),
-                        height: 1),
+                      fontSize: 19,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF17233B),
+                      height: 1,
+                    ),
                   ),
                   const SizedBox(height: 2),
-                  const Text('km/h',
-                      style: TextStyle(fontSize: 9.5, color: Colors.grey)),
+                  const Text(
+                    'km/h',
+                    style: TextStyle(fontSize: 9.5, color: Colors.grey),
+                  ),
                 ],
               ),
             ),
@@ -507,7 +512,9 @@ class _NavigationScreenState extends State<NavigationScreen> {
                       '${formatDistance(_nav.remainingMeters)} · '
                       '预计 ${formatClock(_nav.eta)} 到达',
                       style: const TextStyle(
-                          color: Color(0xFFDBE6F2), fontSize: 13.5),
+                        color: Color(0xFFDBE6F2),
+                        fontSize: 13.5,
+                      ),
                     ),
                     const SizedBox(height: 10),
                     Row(
@@ -524,9 +531,12 @@ class _NavigationScreenState extends State<NavigationScreen> {
                         ),
                         const SizedBox(width: 8),
                         Expanded(
-                          child: _navButton('结束导航', _confirmExit,
-                              background: const Color(0xFF5C2320),
-                              foreground: const Color(0xFFFFB4AB)),
+                          child: _navButton(
+                            '结束导航',
+                            _confirmExit,
+                            background: const Color(0xFF5C2320),
+                            foreground: const Color(0xFFFFB4AB),
+                          ),
                         ),
                       ],
                     ),
@@ -540,9 +550,12 @@ class _NavigationScreenState extends State<NavigationScreen> {
     );
   }
 
-  Widget _navButton(String label, VoidCallback onTap,
-      {Color background = const Color(0xFF1F2C3F),
-      Color foreground = const Color(0xFFDBE6F2)}) {
+  Widget _navButton(
+    String label,
+    VoidCallback onTap, {
+    Color background = const Color(0xFF1F2C3F),
+    Color foreground = const Color(0xFFDBE6F2),
+  }) {
     return FilledButton(
       style: FilledButton.styleFrom(
         backgroundColor: background,

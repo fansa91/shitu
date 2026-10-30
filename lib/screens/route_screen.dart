@@ -45,7 +45,6 @@ class RouteScreen extends StatefulWidget {
   /// 从历史路线进入时带入的起点；为 null 时默认 GPS 起点流程。
   final Poi? initialOrigin;
 
-
   @override
   State<RouteScreen> createState() => _RouteScreenState();
 }
@@ -60,7 +59,7 @@ class _RouteScreenState extends State<RouteScreen> {
   );
 
   final _originController = TextEditingController();
-  final _locationService = LocationService();
+  late final LocationService _locationService;
   late Poi _originPoi = _myLocationPoi;
   late Poi _destPoi = widget.destination;
 
@@ -81,6 +80,7 @@ class _RouteScreenState extends State<RouteScreen> {
   @override
   void initState() {
     super.initState();
+    _locationService = LocationService(settings: widget.settings);
     final initial = widget.initialOrigin;
     if (initial != null && initial.location != null) {
       _originPoi = initial;
@@ -195,34 +195,38 @@ class _RouteScreenState extends State<RouteScreen> {
   void _reload() {
     final future = _loadPlan();
     _planFuture = future;
-    future.then((plan) {
-      // 算路成功记一条路线历史（去重滚动，见 HistoryService）。
-      widget.history.addRoute(
-        originName: _originPoi.name,
-        destinationName: _destPoi.name,
-        mode: _mode,
-        provider: _routeProvider,
-        originPoint: _originPoi.location,
-        destinationPoint: _destPoi.location,
-      );
-      if (mounted) {
-        setState(() {
-          _plan = plan;
-          _selected =
-              plan.options.where((o) => o.recommended).firstOrNull ??
+    future
+        .then((plan) {
+          // 算路成功记一条路线历史（去重滚动，见 HistoryService）。
+          widget.history.addRoute(
+            originName: _originPoi.name,
+            destinationName: _destPoi.name,
+            mode: _mode,
+            provider: _routeProvider,
+            originPoint: _originPoi.location,
+            destinationPoint: _destPoi.location,
+          );
+          if (mounted) {
+            setState(() {
+              _plan = plan;
+              _selected =
+                  plan.options.where((o) => o.recommended).firstOrNull ??
                   plan.options.firstOrNull;
-          // 起点已解析出坐标后回落到 Poi 展示模式（含 GPS 起点）。
-          if (_originPoi.location != null) _originUseText = false;
+              // 起点已解析出坐标后回落到 Poi 展示模式（含 GPS 起点）。
+              if (_originPoi.location != null) _originUseText = false;
+            });
+          }
+        })
+        .onError((_, _) {
+          // 错误由 FutureBuilder 的错误区呈现，这里只吞掉未处理异常。
         });
-      }
-    }).onError((_, _) {
-      // 错误由 FutureBuilder 的错误区呈现，这里只吞掉未处理异常。
-    });
   }
 
   Future<RoutePlan> _loadPlan() async {
     final origin = await _resolveOrigin();
-    return widget.services.serviceFor(_routeProvider).planRoute(
+    return widget.services
+        .serviceFor(_routeProvider)
+        .planRoute(
           origin: origin,
           destination: _destPoi,
           mode: _mode,
@@ -358,7 +362,9 @@ class _RouteScreenState extends State<RouteScreen> {
       color: Theme.of(context).colorScheme.surface,
       child: scrollable
           ? SingleChildScrollView(
-              padding: const EdgeInsets.all(14), child: content)
+              padding: const EdgeInsets.all(14),
+              child: content,
+            )
           : Padding(padding: const EdgeInsets.all(14), child: content),
     );
   }
@@ -433,9 +439,11 @@ class _RouteScreenState extends State<RouteScreen> {
                                 Row(
                                   children: [
                                     if (_originIsGps) ...[
-                                      Icon(Icons.my_location,
-                                          size: 16,
-                                          color: theme.colorScheme.primary),
+                                      Icon(
+                                        Icons.my_location,
+                                        size: 16,
+                                        color: theme.colorScheme.primary,
+                                      ),
                                       const SizedBox(width: 4),
                                     ],
                                     Expanded(
@@ -451,8 +459,7 @@ class _RouteScreenState extends State<RouteScreen> {
                                   Text(
                                     _originPoi.address,
                                     style: theme.textTheme.bodySmall?.copyWith(
-                                      color:
-                                          theme.colorScheme.onSurfaceVariant,
+                                      color: theme.colorScheme.onSurfaceVariant,
                                     ),
                                     overflow: TextOverflow.ellipsis,
                                   ),
@@ -489,8 +496,7 @@ class _RouteScreenState extends State<RouteScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        _destPoi.id == _gpsPoiId &&
-                                _destPoi.address.isEmpty
+                        _destPoi.id == _gpsPoiId && _destPoi.address.isEmpty
                             ? '我的位置（定位坐标）'
                             : _destPoi.name,
                         style: theme.textTheme.bodyLarge,
@@ -621,8 +627,7 @@ class _RouteScreenState extends State<RouteScreen> {
             final plan = snapshot.data!;
             return Column(
               children: [
-                for (final option in plan.options)
-                  _optionCard(context, option),
+                for (final option in plan.options) _optionCard(context, option),
               ],
             );
           },
@@ -661,8 +666,9 @@ class _RouteScreenState extends State<RouteScreen> {
                     Text(
                       '${formatDuration(option.durationSeconds)} · '
                       '${formatDistance(option.distanceMeters)}',
-                      style: theme.textTheme.titleMedium
-                          ?.copyWith(fontWeight: FontWeight.w700),
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     const SizedBox(height: 3),
                     Text(
@@ -716,15 +722,17 @@ class _RouteScreenState extends State<RouteScreen> {
   void _shareSelected() {
     final option = _selected;
     if (option == null) return;
-    SharePlus.instance.share(ShareParams(
-      text: routeShareText(
-        originName: _originPoi.name,
-        destination: _destPoi,
-        mode: _mode,
-        provider: _routeProvider,
-        option: option,
+    SharePlus.instance.share(
+      ShareParams(
+        text: routeShareText(
+          originName: _originPoi.name,
+          destination: _destPoi,
+          mode: _mode,
+          provider: _routeProvider,
+          option: option,
+        ),
       ),
-    ));
+    );
   }
 
   Widget _ctaRow(BuildContext context) {
@@ -737,8 +745,9 @@ class _RouteScreenState extends State<RouteScreen> {
             style: FilledButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 13),
             ),
-            onPressed:
-                _selected == null ? null : () => _startNavigation(simulated: false),
+            onPressed: _selected == null
+                ? null
+                : () => _startNavigation(simulated: false),
           ),
         ),
         const SizedBox(width: 10),
@@ -746,8 +755,9 @@ class _RouteScreenState extends State<RouteScreen> {
           style: OutlinedButton.styleFrom(
             padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 20),
           ),
-          onPressed:
-              _selected == null ? null : () => _startNavigation(simulated: true),
+          onPressed: _selected == null
+              ? null
+              : () => _startNavigation(simulated: true),
           child: const Text('模拟'),
         ),
       ],

@@ -9,8 +9,15 @@ import java.security.MessageDigest
 
 class MainActivity : FlutterActivity() {
 
+    /// 高德定位桥（自持通道，生命周期跟 Activity，销毁时释放）。
+    private var amapLocationBridge: AmapLocationBridge? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        amapLocationBridge = AmapLocationBridge(
+            flutterEngine.dartExecutor.binaryMessenger,
+            applicationContext,
+        )
         // 运行时签名 SHA1 通道：设置页把实际安装包的签名证书 SHA1 显示出来，
         // 供用户与高德控制台登记的 SHA1 对照（不一致时 SDK 鉴权会失败）。
         // 返回原始小写 hex（无分隔符），格式化（大写+冒号）在 Dart 侧统一做。
@@ -26,6 +33,12 @@ class MainActivity : FlutterActivity() {
                     result.notImplemented()
                 }
             }
+    }
+
+    override fun onDestroy() {
+        amapLocationBridge?.dispose()
+        amapLocationBridge = null
+        super.onDestroy()
     }
 
     private fun signingSha1Hex(): String {

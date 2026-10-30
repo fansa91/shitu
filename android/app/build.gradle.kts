@@ -73,3 +73,11 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // 高德定位 SDK（仅定位、不含地图渲染）：Dart 侧自写最小桥
+    // （AmapLocationBridge.kt）直连。版本取 Maven 长期线 6.5.1：
+    // AMapLocationClient / updatePrivacyShow / updatePrivacyAgree /
+    // setApiKey 均为该线经典 API。
+    implementation("com.amap.api:location:6.5.1")
+}

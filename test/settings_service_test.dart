@@ -3,6 +3,7 @@ import 'dart:ui' show Color;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:shitu/models/located_fix.dart';
 import 'package:shitu/models/map_provider.dart';
 import 'package:shitu/services/map_tiles.dart';
 import 'package:shitu/services/settings_service.dart';
@@ -80,5 +81,26 @@ void main() {
     expect(reloaded.dynamicColorEnabled, isFalse);
     expect(reloaded.seedColor, const Color(0xFFC62828));
     expect(reloaded.seedColorValue, 0xFFC62828);
+  });
+
+  test('高德定位设置：SDK Key（安全存储）/隐私同意/定位源三档往返', () async {
+    final service = SettingsService();
+    await service.load();
+    // 默认：无 Key、未同意隐私、自动档。
+    expect(service.amapSdkAndroidKey, isEmpty);
+    expect(service.hasAmapSdkAndroidKey, isFalse);
+    expect(service.privacyAgreed, isFalse);
+    expect(service.locationSourceMode, LocationSourceMode.auto);
+
+    await service.setAmapSdkAndroidKey(' sdk-key-123 ');
+    await service.setPrivacyAgreed(true);
+    await service.setLocationSourceMode(LocationSourceMode.amap);
+
+    final reloaded = SettingsService();
+    await reloaded.load();
+    expect(reloaded.amapSdkAndroidKey, 'sdk-key-123');
+    expect(reloaded.hasAmapSdkAndroidKey, isTrue);
+    expect(reloaded.privacyAgreed, isTrue);
+    expect(reloaded.locationSourceMode, LocationSourceMode.amap);
   });
 }
